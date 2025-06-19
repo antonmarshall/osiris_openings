@@ -78,12 +78,8 @@ class Node:
         win_rate = self.get_win_rate()
         countable_games = self.wins + self.losses + self.draws
         
-        # DEBUG: Log what's happening
-        logger.info(f"🎨 COLOR DEBUG: wins={self.wins}, draws={self.draws}, losses={self.losses}, countable={countable_games}, win_rate={win_rate:.1f}%")
-        
         # If no statistical data, use neutral gray
         if countable_games == 0:
-            logger.info(f"🎨 COLOR DEBUG: Returning gray because countable_games=0")
             return "#9e9e9e"  # Gray for no data
         
         # Map win rate to color gradient from red to yellow to green
@@ -400,10 +396,23 @@ class OpeningTree:
             except ValueError:  # Should not happen if UCI is valid and board is in sync
                 logger.error(f"Could not parse UCI move '{move_uci}' from FEN '{fen}'. Using UCI as SAN.")
                 move_san = move_uci # Fallback
+              # Child node stats are already from the perspective of self.player_name
+            child_stats = child_node_obj.to_dict(display_perspective, include_children=False, max_depth=1)
             
-            # Child node stats are already from the perspective of self.player_name
-            child_stats = child_node_obj.to_dict(display_perspective, include_children=False, max_depth=1)            # Calculate color using the modular method - green for repertoire, performance-based for regular games
-            color = child_node_obj.get_move_color(is_repertoire=self.own_repertoir)
+            # Calculate color using child_stats data (has correct win_rate)
+            win_rate = child_stats.get('win_rate', 0.0)
+            if self.own_repertoir:
+                color = "#4caf50"  # Green for repertoire moves
+            elif win_rate >= 65:
+                color = "#4caf50"    # Green for excellent (65%+)
+            elif win_rate >= 55:
+                color = "#8bc34a"    # Light green for good (55-64%)
+            elif win_rate >= 45:
+                color = "#ffeb3b"    # Yellow for average (45-54%)
+            elif win_rate >= 35:
+                color = "#ff9800"    # Orange for below average (35-44%)
+            else:
+                color = "#f44336"    # Red for poor (below 35%)
 
             # Calculate arrow thickness (opacity now handled by Chessground brushes)
             if max_games > min_games:

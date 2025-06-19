@@ -974,13 +974,7 @@ function addMoveArrow(fromSquare, toSquare, color = '#15781B', opacity = 0.8) {
     console.warn('⚠️ Chessground board not ready - skipping arrow addition');
     return null;
   }
-  
-  try {
-    // ARCHITECTURE: Enhanced arrow debugging for NaN coordinate issue
-    console.log(`🔍 ARROW DEBUG: Adding arrow ${fromSquare} -> ${toSquare}`);
-    console.log(`🔍 ARROW DEBUG: Chessground state available:`, !!window.cg);
-    console.log(`🔍 ARROW DEBUG: Board orientation:`, window.cg?.state?.orientation);
-    
+    try {
     const currentShapes = window.cg.state.drawable.shapes || [];
     const newShape = {
       orig: fromSquare,
@@ -988,13 +982,9 @@ function addMoveArrow(fromSquare, toSquare, color = '#15781B', opacity = 0.8) {
       brush: 'green'  // Chessground uses predefined brush names
     };
     
-    console.log(`🔍 ARROW DEBUG: Shape object:`, newShape);
-    console.log(`🔍 ARROW DEBUG: Current shapes count:`, currentShapes.length);
-    
-    // ENHANCEMENT: Add shape with proper error handling
+    // Add shape with proper error handling
     window.cg.setShapes([...currentShapes, newShape]);
     
-    console.log(`🏹 Added arrow ${fromSquare}-${toSquare} with Chessground`);
     return `arrow-${fromSquare}-${toSquare}`; // Return meaningful ID
   } catch (error) {
     console.error('❌ Error adding arrow:', error);

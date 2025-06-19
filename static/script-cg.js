@@ -213,13 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
       '#f44336': 'poor',       // Red - Below 35% win rate
       '#9e9e9e': 'nodata'      // Gray - No statistical data
     };
-    
-    const result = colorToBrush[backendColor] || 'nodata';
-    
-    // Debug: Log mapping for troubleshooting
-    if (result === 'excellent' && backendColor !== '#4caf50') {
-      console.warn(`🔍 BRUSH DEBUG: Unexpected mapping ${backendColor} → ${result}`);
-    }
+      const result = colorToBrush[backendColor] || 'nodata';
     
     return result;
   }
