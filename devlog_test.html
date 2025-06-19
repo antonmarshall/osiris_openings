@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevLog Fix Test</title>
+</head>
+<body>
+    <h1>DevLog Fix Test</h1>
+    <p>Open the console (F12) to see the test results.</p>
+    
+    <script>
+        // Copy the fixed DevLog from script.js
+        const DevLog = {
+            action: (action, details = {}) => {
+                const timestamp = new Date().toLocaleTimeString();
+                console.info(`🔵 [${timestamp}] ACTION: ${action}`, details);
+            },
+            apiStart: (endpoint, data = {}) => {
+                const timestamp = new Date().toLocaleTimeString();
+                console.info(`🟡 [${timestamp}] API START: ${endpoint}`, data);
+                return performance.now();
+            },
+            apiEnd: (endpoint, startTime, response = {}) => {
+                const duration = (performance.now() - startTime).toFixed(1);
+                const timestamp = new Date().toLocaleTimeString();
+                console.info(`🟢 [${timestamp}] API END: ${endpoint} (${duration}ms)`, response);
+            },
+            apiError: (endpoint, error, context = {}) => {
+                const timestamp = new Date().toLocaleTimeString();
+                console.error(`🔴 [${timestamp}] API ERROR: ${endpoint}`, error, context);
+            },
+            critical: (error, context = {}) => {
+                const timestamp = new Date().toLocaleTimeString();
+                console.error(`💥 [${timestamp}] CRITICAL:`, error, context);
+            },
+            summary: (title, data) => {
+                const timestamp = new Date().toLocaleTimeString();
+                console.table(data);
+                console.info(`📊 [${timestamp}] SUMMARY: ${title}`);
+            },
+            // Silent function timing (for compatibility)
+            funcStart: (funcName, args = {}) => {
+                return performance.now();
+            },
+            funcEnd: (funcName, startTime, result = {}) => {
+                // Silent - no logging
+            }
+        };
+
+        // Test all DevLog methods
+        console.log('=== DevLog Fix Test ===');
+        
+        try {
+            // Test action
+            DevLog.action('Test Action', {test: true});
+            
+            // Test API timing
+            const apiStart = DevLog.apiStart('/test', {param: 'value'});
+            setTimeout(() => {
+                DevLog.apiEnd('/test', apiStart, {result: 'success'});
+            }, 100);
+            
+            // Test function timing (should be silent)
+            const funcStart = DevLog.funcStart('testFunction', {arg1: 'value'});
+            DevLog.funcEnd('testFunction', funcStart, {result: 'complete'});
+            
+            // Test summary table
+            const testData = [
+                {Move: 'e4', Games: 1234, 'Win%': 56, 'Draw%': 33, 'Loss%': 11},
+                {Move: 'd4', Games: 987, 'Win%': 52, 'Draw%': 40, 'Loss%': 8}
+            ];
+            DevLog.summary('Test Moves', testData);
+            
+            // Test critical
+            DevLog.critical('Test critical message', {context: 'test'});
+            
+            console.log('✅ All DevLog methods work correctly!');
+            
+        } catch (error) {
+            console.error('❌ DevLog test failed:', error);
+        }
+    </script>
+</body>
+</html>

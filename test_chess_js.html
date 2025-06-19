@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test chess.js 1.4.0</title>
+    <script src="https://cdn.jsdelivr.net/npm/chess.js@1.4.0/dist/cjs/chess.min.js"></script>
+</head>
+<body>
+    <h1>Test chess.js 1.4.0</h1>
+    <div id="output"></div>
+    <script>
+        function log(message) {
+            const output = document.getElementById('output');
+            output.innerHTML += '<p>' + message + '</p>';
+            console.log(message);
+        }
+        
+        try {
+            log('Testing chess.js 1.4.0...');
+            
+            // Test if Chess constructor is available
+            if (typeof Chess === 'undefined') {
+                log('❌ ERROR: Chess constructor not available');
+                log('Available globals: ' + Object.keys(window).filter(k => k.toLowerCase().includes('chess')));
+            } else {
+                log('✅ Chess constructor is available');
+                
+                // Test basic functionality
+                const chess = new Chess();
+                log('✅ Chess instance created successfully');
+                
+                // Test FEN
+                const fen = chess.fen();
+                log('✅ FEN: ' + fen.substring(0, 50) + '...');
+                
+                // Test moves
+                const moves = chess.moves();
+                log('✅ Legal moves: ' + moves.length + ' moves available');
+                log('First few moves: ' + moves.slice(0, 5).join(', '));
+                
+                // Test move execution
+                const moveResult = chess.move('e4');
+                if (moveResult) {
+                    log('✅ Move e4 successful: ' + JSON.stringify(moveResult));
+                } else {
+                    log('❌ Move e4 failed');
+                }
+                
+                // Test object notation
+                const chess2 = new Chess();
+                const moveResult2 = chess2.move({ from: 'e2', to: 'e4' });
+                if (moveResult2) {
+                    log('✅ Object notation move successful');
+                } else {
+                    log('❌ Object notation move failed');
+                }
+            }
+        } catch (error) {
+            log('❌ ERROR: ' + error.message);
+            log('Error details: ' + error.stack);
+        }
+    </script>
+</body>
+</html>

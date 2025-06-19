@@ -1,0 +1,175 @@
+<!--
+  horus openings – Haupt-Frontend
+  --------------------------------
+  - Visualisiert Schacheröffnungen im Browser
+  - Nutzt chessboard.js (Brett) & chess.js (Logik)
+  - Kommuniziert mit FastAPI-Backend
+  - Spieler- und Zugauswahl, Statistikanzeige
+-->
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HORUS</title>
+  <!-- Projekt-Styles -->
+  <link rel="stylesheet" href="/static/style.css" />  <!-- Abhängigkeiten: chess.js (neueste Version v1.4.0), chessboard2 (kein jQuery mehr nötig) -->  <!-- Chessground CSS (base styles + theme) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.2.1/assets/chessground.base.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.2.1/assets/chessground.brown.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chessground@9.2.1/assets/chessground.cburnett.css">  <!-- Load Chessground ESM + Chess.js ESM (with Drag & Drop Integration) -->
+  <script type="module" src="/static/script-cg.js?v=3.0"></script>
+  <!-- Load main application logic (with Backend-Focused Drag & Drop) -->
+  <script src="/static/script.js?v=3.0"></script>
+  <!-- Favicon & App Icons -->
+  <link rel="icon" type="image/png" href="/static/favicon-circle.png">
+  <link rel="shortcut icon" href="/static/favicon-circle.png">
+</head>
+<body>
+  <div class="container">
+    <h1>horus openings</h1>
+    <!-- Menü-Bereich: Spielerwahl & Neuer Spieler (zentriert, modern) -->    <div class="section player-menu" style="max-width: 800px; margin: 0 auto 30px auto; padding: 0 20px;">
+      <div class="player-controls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
+        <!-- Vorhandene Spieler -->        <div class="existing-players" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef; height: 280px; display: flex; flex-direction: column;">
+          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Vorhandene Spieler</h3>
+          
+          <select id="playerSelect" style="
+            padding: 12px 14px; 
+            border-radius: 8px; 
+            border: 2px solid #dee2e6; 
+            font-size: 1rem; 
+            background: #fff; 
+            color: #495057; 
+            outline: none; 
+            margin-bottom: 16px;
+            width: 100%;
+            box-sizing: border-box;
+          ">
+            <option>Lade Spieler...</option>
+          </select>
+          
+          <div class="color-filter" style="margin-bottom: 20px; text-align: center;">
+            <label style="margin-right: 20px; font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
+              <input type="radio" name="colorSelect" value="white" checked style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Weiß
+            </label>
+            <label style="font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
+              <input type="radio" name="colorSelect" value="black" style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Schwarz
+            </label>
+          </div>
+          
+          <button id="analyzeBtn" class="analyze-btn" style="
+            margin-top: auto; 
+            padding: 16px 20px; 
+            border-radius: 8px; 
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); 
+            color: #fff; 
+            font-weight: 600; 
+            font-size: 1.1rem; 
+            border: none; 
+            cursor: pointer; 
+            box-shadow: 0 4px 12px rgba(44, 62, 80, 0.2); 
+            width: 100%;
+          ">
+            📊 Eröffnungen analysieren
+          </button>
+        </div>
+        <!-- Neuer Spieler -->        <div class="new-player" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef; height: 280px; display: flex; flex-direction: column;">
+          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Neuen Spieler hinzufügen</h3>
+          
+          <input type="text" id="newPlayerName" placeholder="z.B. Magnus_Carlsen" style="
+            padding: 12px 14px; 
+            border-radius: 8px; 
+            border: 2px solid #dee2e6; 
+            font-size: 1rem; 
+            background: #fff; 
+            color: #495057; 
+            outline: none; 
+            margin-bottom: 12px;
+            width: 100%;
+            box-sizing: border-box;
+          ">
+          
+          <input type="number" id="downloadLimit" min="10" max="1000" step="10" value="200" placeholder="Limit (z.B. 200)" style="
+            padding: 12px 14px; 
+            border-radius: 8px; 
+            border: 2px solid #dee2e6; 
+            font-size: 1rem; 
+            background: #fff; 
+            color: #495057; 
+            outline: none; 
+            margin-bottom: 20px;
+            width: 100%;
+            box-sizing: border-box;
+          ">
+          
+          <button id="downloadPlayer" style="
+            margin-top: auto; 
+            padding: 16px 20px; 
+            border-radius: 8px; 
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); 
+            color: #fff; 
+            font-weight: 600; 
+            font-size: 1.1rem; 
+            border: none; 
+            cursor: pointer; 
+            box-shadow: 0 4px 12px rgba(39, 174, 96, 0.2); 
+            width: 100%;
+          ">
+            ➕ Spieler hinzufügen
+          </button>
+          
+          <div id="downloadStatus" style="margin-top: 12px; min-height: 22px; color: #e74c3c; font-size: 0.9rem; text-align: center;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analysis Results Section -->
+    <div id="analysisResults" class="analysis-section" style="display: none; max-width: 900px; margin: 20px auto; padding: 20px; background: #f8f9fa; border-radius: 12px; border: 1px solid #e1e8ed;">
+      <div class="results-header" style="margin-bottom: 20px;">
+        <h3 style="color: #2c3e50; margin: 0 0 8px 0; font-size: 1.3rem;">Opening Analysis Results</h3>
+        <div id="positionInfo" style="font-size: 0.95rem; color: #666; margin-bottom: 12px;"></div>
+      </div>      <div class="results-content" style="display: grid; grid-template-columns: 400px 1fr; gap: 24px; align-items: start;">        <!-- Chess Board - Left side, larger -->
+        <div id="chessboardSection" class="board-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h4 style="margin: 0; color: #333; font-size: 1.2rem;">Current Position</h4>
+            <button id="flipBoardBtn" class="flip-btn" title="Brett drehen" style="background: #f0f0f0; border: 1px solid #bbb; cursor: pointer; padding: 6px 12px; font-size: 0.9rem; font-weight: 600; border-radius: 6px; color: #2c3e50; transition: background 0.18s, color 0.18s;">
+              🔄 Flip
+            </button>
+          </div>
+          
+          <div id="board" class="chessground" style="width: 100%; max-width: 360px; height: 360px; margin: 0 auto 16px auto;"></div>
+          
+          <!-- Position Statistics below the board -->
+          <div id="positionStats" class="stats-below-board" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
+            <h5 style="margin: 0 0 8px 0; color: #555; font-size: 1rem;">Position Statistics</h5>
+            <div id="statsContent"></div>
+          </div>
+        </div>
+        
+        <!-- Available Moves - Right side -->
+        <div id="movesSection" class="moves-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; min-height: 400px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h4 style="margin: 0; color: #333; font-size: 1.2rem;">Available Moves</h4>
+            <button id="backBtn" disabled style="background: #e9ecef; border: 1px solid #ced4da; cursor: not-allowed; padding: 6px 12px; font-size: 0.9rem; font-weight: 600; border-radius: 6px; color: #6c757d; transition: all 0.18s;">
+              ← Back
+            </button>
+          </div>
+          
+          <div id="movesList" style="max-height: 400px; overflow-y: auto; margin-bottom: 16px;"></div>
+            <!-- Repertoire Switch at bottom of moves section -->
+          <div style="border-top: 1px solid #eee; padding-top: 16px;">
+            <label class="switch-label" style="display: flex; align-items: center; gap: 8px; font-size: 0.95rem; cursor: pointer; color: #555;">
+              <span>💾 Save to Repertoire</span>
+              <div class="toggle-switch" style="position: relative; width: 44px; height: 24px; background-color: #ccc; border-radius: 24px; transition: 0.3s; cursor: pointer;">
+                <input type="checkbox" id="saveToRepertoireSwitch" style="opacity: 0; width: 0; height: 0;">
+                <div class="toggle-slider" style="position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background-color: white; border-radius: 50%; transition: 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>
+              </div>
+            </label>
+            <div id="saveStatus" style="margin-top: 8px; font-size: 0.85rem; color: #27ae60; min-height: 1em;"></div>
+          </div>
+        </div>
+      </div>    </div>
+
+    <!-- Haupt-JavaScript (Frontend-Logik) -->
+  </div>
+</body>
+</html>

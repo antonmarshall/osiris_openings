@@ -1,0 +1,402 @@
+/* horus openings – Stylesheet (style.css)
+   ----------------------------------------
+   Modernes, reduziertes Layout für Schach-Frontend
+   Fokus: Übersicht, Lesbarkeit, dezente Farben
+*/
+
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 20px;
+  background-color: #f5f5f5;
+}
+
+h1 {
+  text-align: center;
+  color: #2c3e50;
+  margin-bottom: 30px;
+}
+
+.section {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.07);
+}
+
+#container {
+  display: flex;
+  gap: 24px;
+  margin-top: 20px;
+}
+
+#board {
+  width: 480px;
+  height: 480px;
+  min-width: 240px;
+  min-height: 240px;
+  background: #eaeaea;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(44,62,80,0.07);
+}
+
+#info {
+  flex: 1;
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.07);
+}
+
+/* Moderne Button-Styles für Player-Buttons */
+#analyzeBtn:hover {
+  background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%) !important;
+  box-shadow: 0 6px 16px rgba(44, 62, 80, 0.3) !important;
+  transform: translateY(-1px);
+}
+
+#downloadPlayer:hover {
+  background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%) !important;
+  box-shadow: 0 6px 16px rgba(39, 174, 96, 0.3) !important;
+  transform: translateY(-1px);
+}
+
+#analyzeBtn:active, #downloadPlayer:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Input Focus States */
+#playerSelect:focus, #newPlayerName:focus, #downloadLimit:focus {
+  border-color: #3498db !important;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1) !important;
+}
+
+/* Radio Button Styling */
+input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #bdc3c7;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+input[type="radio"]:checked {
+  border-color: #2c3e50;
+  background: #2c3e50;
+}
+
+input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: white;
+}
+
+#moves {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 12px;
+}
+
+.move-stats-card {
+  /* Basis-Styling wird inline in JavaScript definiert für bessere Modularität */
+  font-family: inherit;
+  user-select: none;
+}
+.move-stats-card:focus {
+  outline: 2px solid #3498db;
+  outline-offset: 2px;
+}
+.move-stats-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.move-recency {
+  display: inline-block;
+  height: 16px;
+  min-width: 18px;
+  width: 22px;
+  margin-left: 8px;
+  margin-right: 2px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #e0e6ef 0%, #3498db 100%);
+  position: relative;
+  vertical-align: middle;
+  box-shadow: 0 1px 2px rgba(44,62,80,0.03);
+  opacity: 0.92;
+  transition: background 0.18s, box-shadow 0.18s;
+  cursor: pointer;
+}
+.move-recency.recent {
+  background: linear-gradient(90deg, #2ecc71 0%, #3498db 100%);
+  box-shadow: 0 2px 8px rgba(52,152,219,0.10);
+}
+.move-recency-dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #3498db;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1.5px 4px rgba(44,62,80,0.07);
+  border: 2px solid #fff;
+}
+.move-recency.recent .move-recency-dot {
+  background: #2ecc71;
+  border-color: #16a085;
+}
+.move-recency .move-sparkline-tooltip {
+  display: none;
+}
+
+.move-elo-diff {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 1.08em;
+  color: #217dbb;
+  background: #eaf4fb;
+  border: 1.5px solid #b6d6ec;
+  border-radius: 8px;
+  padding: 6px 16px;
+  align-self: flex-end;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+#backBtn, #analyzeBtn, #downloadPlayer {
+  padding: 10px 20px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 600;
+  margin-bottom: 8px;
+  transition: background 0.18s;
+}
+#backBtn:hover, #analyzeBtn:hover, #downloadPlayer:hover {
+  background-color: #2980b9;
+}
+#backBtn:disabled, #analyzeBtn:disabled, #downloadPlayer:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
+}
+
+#playerSelect, #newPlayerName, #downloadLimit {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #dbe3ea;
+  border-radius: 4px;
+  background-color: #fff;
+  margin-bottom: 10px;
+  font-size: 1em;
+}
+
+#playerColorLabel {
+  display: block;
+  text-align: center;
+  font-size: 1.05em;
+  color: #888;
+  margin-top: 2px;
+  margin-bottom: 8px;
+  letter-spacing: 0.01em;
+}
+
+.move-timeline {
+  display: flex;
+  align-items: flex-end;
+  height: 16px;
+  gap: 2px;
+  margin: 4px 0 0 0;
+  opacity: 0.7;
+}
+.move-timeline div {
+  width: 7px;
+  min-width: 3px;
+  border-radius: 2px;
+  background: #3498db;
+  transition: background 0.18s, height 0.18s;
+}
+.move-timeline div:hover {
+  background: #2ecc71;
+  opacity: 1;
+}
+
+/* Minimalistischer, cleaner Toggle-Switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  vertical-align: middle;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #e4e4e4;
+  transition: background 0.2s;
+  border-radius: 24px;
+  border: 1.2px solid #bbb;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 2.5px;
+  background: #fff;
+  transition: .2s;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(44,62,80,0.08);
+}
+.switch input:checked + .slider {
+  background: #2ecc71;
+  border: 1.2px solid #2ecc71;
+}
+.switch input:checked + .slider:before {
+  transform: translateX(20px);
+}
+.switch-label {
+  user-select: none;
+  font-weight: 500;
+  color: #222;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 18px;
+  background: #fafbfc;
+  box-shadow: 0 1px 2px rgba(44,62,80,0.04);
+  border: none;
+  transition: background 0.15s;
+}
+.switch-label:hover {
+  background: #f2f6f4;
+}
+.switch-label.active {
+  background: #eafaf2;
+  color: #218c5a;
+  border: none;
+  box-shadow: 0 1px 2px rgba(44,62,80,0.04);
+}
+
+/* ====================================================================
+   MOVE HIGHLIGHTING STYLES (für Schritt 3)
+   ====================================================================
+   Verschiedene Highlight-Stile für Züge auf dem Schachbrett:
+   - from: Ausgangsfeld (gelb)
+   - to: Zielfeld (grün)
+   - possible: Mögliche Züge (blau)
+   - best: Bester Zug (orange + Animation)
+*/
+
+.highlight-move-from {
+  background-color: rgba(255, 255, 0, 0.6) !important;
+  box-shadow: inset 0 0 0 3px #ffeb3b !important;
+}
+
+.highlight-move-to {
+  background-color: rgba(76, 175, 80, 0.6) !important;
+  box-shadow: inset 0 0 0 3px #4caf50 !important;
+}
+
+.highlight-move-possible {
+  background-color: rgba(33, 150, 243, 0.4) !important;
+  box-shadow: inset 0 0 0 2px #2196f3 !important;
+}
+
+.highlight-move-best {
+  background-color: rgba(255, 87, 34, 0.6) !important;
+  box-shadow: inset 0 0 0 4px #ff5722 !important;
+  animation: pulse-highlight 2s infinite;
+}
+
+@keyframes pulse-highlight {
+  0%, 100% { 
+    opacity: 0.6; 
+  }
+  50% { 
+    opacity: 0.9; 
+  }
+}
+
+/* ====================================================================
+   END MOVE HIGHLIGHTING STYLES
+   ================================================================== */
+
+/* ====================================================================
+   Chessboard2 Specific Styles
+   ====================================================================*/
+
+/* Chessboard2 container sizing and responsiveness */
+#chessboard {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Arrows styling for chessboard2 */
+.arrow-bc3c7 {
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Circles styling for chessboard2 */
+.circle-a0266 {
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Ensure move highlights and arrows work together */
+.highlight-from,
+.highlight-to,
+.highlight-check,
+.highlight-last {
+  z-index: 0;
+}
+
+/* Chessboard2 board styling enhancements */
+.chessboard-board-wrapper {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  #chessboard {
+    max-width: 90vw;
+  }
+  
+  .arrow-bc3c7,
+  .circle-a0266 {
+    /* Ensure arrows/circles scale properly on mobile */
+    transform-origin: center;
+  }
+}

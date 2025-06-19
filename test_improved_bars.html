@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Improved Chess.com Style Bars</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        /* OLD STYLE - for comparison */
+        .move-card-old {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 320px;
+            height: 28px;
+            padding: 6px 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background: white;
+            margin: 4px 0;
+            font-family: inherit;
+        }
+        .stats-bar-old {
+            width: 60px;
+            height: 16px;
+            border-radius: 4px;
+            background: #e5e5e5;
+            overflow: hidden;
+            position: relative;
+            flex-shrink: 0;
+            display: flex;
+        }
+        
+        /* NEW IMPROVED STYLE */
+        .move-card-new {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: 360px;
+            height: 32px;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background: white;
+            margin: 4px 0;
+            font-family: inherit;
+        }
+        .stats-bar-new {
+            width: 80px;
+            height: 18px;
+            border-radius: 2px;
+            background: #e5e5e5;
+            overflow: hidden;
+            position: relative;
+            flex-shrink: 0;
+            display: flex;
+        }
+        
+        /* Common styles */
+        .move-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 90px;
+            flex-shrink: 0;
+        }
+        .move-text {
+            font-weight: bold;
+            font-size: 13px;
+            color: #2c3e50;
+            min-width: 40px;
+        }
+        .games-text {
+            font-size: 11px;
+            color: #666;
+            min-width: 50px;
+        }
+        .segment {
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            box-sizing: border-box;
+            float: left;
+        }
+        .segment-old {
+            font-size: 10px;
+        }
+        .segment-new {
+            font-size: 11px;
+        }
+        .win-segment { background: #81c784; }
+        .draw-segment { background: #ffb74d; }
+        .loss-segment { background: #e57373; }
+        .winrate {
+            font-size: 11px;
+            font-weight: 500;
+            color: #666;
+            min-width: 35px;
+            text-align: right;
+        }
+        .elo {
+            font-size: 11px;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+        .elo.positive { color: #4caf50; }
+        .elo.negative { color: #f44336; }
+        
+        .comparison {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Improved Chess.com Style Statistics Bars</h1>
+        <p>Comparison of old vs new design with better spacing and less rounded edges</p>
+        
+        <div class="comparison">
+            <h3>OLD STYLE (cramped, very rounded):</h3>
+            <div class="move-card-old">
+                <div class="move-info">
+                    <span class="move-text">e4</span>
+                    <span class="games-text">(1234)</span>
+                </div>
+                <div class="stats-bar-old">
+                    <div class="segment segment-old win-segment" style="width: 56%;">56%</div>
+                    <div class="segment segment-old draw-segment" style="width: 33%;">33%</div>
+                    <div class="segment segment-old loss-segment" style="width: 11%;">11%</div>
+                </div>
+                <span class="winrate">72%</span>
+                <span class="elo positive">+45</span>
+            </div>
+        </div>
+        
+        <div class="comparison">
+            <h3>NEW IMPROVED STYLE (spacious, less rounded, no redundant percentage):</h3>
+            <div class="move-card-new">
+                <div class="move-info">
+                    <span class="move-text">e4</span>
+                    <span class="games-text">(1234)</span>
+                </div>
+                <div class="stats-bar-new">
+                    <div class="segment segment-new win-segment" style="width: 56%;">56%</div>
+                    <div class="segment segment-new draw-segment" style="width: 33%;">33%</div>
+                    <div class="segment segment-new loss-segment" style="width: 11%;">11%</div>
+                </div>
+                <span class="elo positive">+45</span>
+            </div>
+        </div>
+        
+        <h3>More Examples with New Style:</h3>
+        
+        <div class="move-card-new">
+            <div class="move-info">
+                <span class="move-text">d4</span>
+                <span class="games-text">(987)</span>
+            </div>
+            <div class="stats-bar-new">
+                <div class="segment segment-new win-segment" style="width: 52%;">52%</div>
+                <div class="segment segment-new draw-segment" style="width: 40%;">40%</div>
+                <div class="segment segment-new loss-segment" style="width: 8%;"></div>
+            </div>
+            <span class="elo positive">+38</span>
+        </div>
+        
+        <div class="move-card-new">
+            <div class="move-info">
+                <span class="move-text">Nf3</span>
+                <span class="games-text">(456)</span>
+            </div>
+            <div class="stats-bar-new">
+                <div class="segment segment-new win-segment" style="width: 45%;">45%</div>
+                <div class="segment segment-new draw-segment" style="width: 45%;">45%</div>
+                <div class="segment segment-new loss-segment" style="width: 10%;">10%</div>
+            </div>
+            <span class="elo positive">+22</span>
+        </div>
+        
+        <div class="move-card-new">
+            <div class="move-info">
+                <span class="move-text">g3</span>
+                <span class="games-text">(89)</span>
+            </div>
+            <div class="stats-bar-new">
+                <div class="segment segment-new win-segment" style="width: 85%;">85%</div>
+                <div class="segment segment-new draw-segment" style="width: 12%;">12%</div>
+                <div class="segment segment-new loss-segment" style="width: 3%;"></div>
+            </div>
+            <span class="elo positive">+67</span>
+        </div>
+        
+        <h3>Improvements Made:</h3>
+        <ul>
+            <li>✅ <strong>Less rounded</strong>: Border-radius reduced from 4px → 2px</li>
+            <li>✅ <strong>More spacious</strong>: Container height 28px → 32px, padding increased</li>
+            <li>✅ <strong>Wider bar</strong>: Stats bar width 60px → 80px for better text display</li>
+            <li>✅ <strong>Bigger text</strong>: Percentage text 10px → 11px, looks less cramped</li>
+            <li>✅ <strong>Lower threshold</strong>: Text shows for segments >8% (was >10%)</li>
+            <li>✅ <strong>Removed redundant total percentage</strong> - individual percentages are enough</li>
+            <li>✅ <strong>Better gap spacing</strong>: 8px → 10px between elements</li>
+        </ul>
+    </div>
+</body>
+</html>

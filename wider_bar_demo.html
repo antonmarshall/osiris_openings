@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Even Wider Stats Bar</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .move-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            height: 32px;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background: white;
+            margin: 8px 0;
+            font-family: inherit;
+        }
+        
+        .move-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 90px;
+            flex-shrink: 0;
+        }
+        .move-text {
+            font-weight: bold;
+            font-size: 13px;
+            color: #2c3e50;
+            min-width: 40px;
+        }
+        .games-text {
+            font-size: 11px;
+            color: #666;
+            min-width: 50px;
+        }
+        
+        .stats-bar {
+            height: 18px;
+            border-radius: 2px;
+            background: #e5e5e5;
+            overflow: hidden;
+            position: relative;
+            flex-shrink: 0;
+            display: flex;
+        }
+        .stats-bar-80 { width: 80px; }
+        .stats-bar-100 { width: 100px; }
+        .stats-bar-120 { width: 120px; }
+        
+        .segment {
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            box-sizing: border-box;
+            float: left;
+        }
+        .win-segment { background: #81c784; }
+        .draw-segment { background: #ffb74d; }
+        .loss-segment { background: #e57373; }
+        
+        .elo {
+            font-size: 11px;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+            flex-shrink: 0;
+            color: #4caf50;
+        }
+        
+        .comparison {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+        }
+        
+        .size-label {
+            font-size: 12px;
+            color: #666;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📏 Stats Bar Width Progression</h1>
+        <p>Comparing different bar widths for optimal percentage display</p>
+        
+        <div class="comparison">
+            <h3>📊 Original: 80px width</h3>
+            <div class="move-card">
+                <div class="move-info">
+                    <span class="move-text">e4</span>
+                    <span class="games-text">(1,234)</span>
+                </div>
+                <div class="stats-bar stats-bar-80">
+                    <div class="segment win-segment" style="width: 55%;">55%</div>
+                    <div class="segment draw-segment" style="width: 33%;">33%</div>
+                    <div class="segment loss-segment" style="width: 12%;">12%</div>
+                </div>
+                <span class="elo">+45</span>
+                <span class="size-label">80px bar</span>
+            </div>
+        </div>
+        
+        <div class="comparison">
+            <h3>🎯 Previous: 100px width</h3>
+            <div class="move-card">
+                <div class="move-info">
+                    <span class="move-text">e4</span>
+                    <span class="games-text">(1,234)</span>
+                </div>
+                <div class="stats-bar stats-bar-100">
+                    <div class="segment win-segment" style="width: 55%;">55%</div>
+                    <div class="segment draw-segment" style="width: 33%;">33%</div>
+                    <div class="segment loss-segment" style="width: 12%;">12%</div>
+                </div>
+                <span class="elo">+45</span>
+                <span class="size-label">100px bar</span>
+            </div>
+        </div>
+        
+        <div class="comparison">
+            <h3>🚀 NEW: 120px width (Even More Spacious!)</h3>
+            <div class="move-card">
+                <div class="move-info">
+                    <span class="move-text">e4</span>
+                    <span class="games-text">(1,234)</span>
+                </div>
+                <div class="stats-bar stats-bar-120">
+                    <div class="segment win-segment" style="width: 55%;">55%</div>
+                    <div class="segment draw-segment" style="width: 33%;">33%</div>
+                    <div class="segment loss-segment" style="width: 12%;">12%</div>
+                </div>
+                <span class="elo">+45</span>
+                <span class="size-label">120px bar</span>
+            </div>
+        </div>
+        
+        <h3>📊 More Examples with 120px Bar:</h3>
+        
+        <div class="move-card">
+            <div class="move-info">
+                <span class="move-text">d4</span>
+                <span class="games-text">(987)</span>
+            </div>
+            <div class="stats-bar stats-bar-120">
+                <div class="segment win-segment" style="width: 52%;">52%</div>
+                <div class="segment draw-segment" style="width: 40%;">40%</div>
+                <div class="segment loss-segment" style="width: 8%;"></div>
+            </div>
+            <span class="elo">+38</span>
+        </div>
+        
+        <div class="move-card">
+            <div class="move-info">
+                <span class="move-text">Nf3</span>
+                <span class="games-text">(456)</span>
+            </div>
+            <div class="stats-bar stats-bar-120">
+                <div class="segment win-segment" style="width: 45%;">45%</div>
+                <div class="segment draw-segment" style="width: 45%;">45%</div>
+                <div class="segment loss-segment" style="width: 10%;">10%</div>
+            </div>
+            <span class="elo">+22</span>
+        </div>
+        
+        <div class="move-card">
+            <div class="move-info">
+                <span class="move-text">c4</span>
+                <span class="games-text">(234)</span>
+            </div>
+            <div class="stats-bar stats-bar-120">
+                <div class="segment win-segment" style="width: 48%;">48%</div>
+                <div class="segment draw-segment" style="width: 42%;">42%</div>
+                <div class="segment loss-segment" style="width: 10%;">10%</div>
+            </div>
+            <span class="elo">+28</span>
+        </div>
+        
+        <h3>✨ New Dimensions:</h3>
+        <ul>
+            <li>📏 <strong>Bar width</strong>: 80px → 100px → <strong>120px (+50% from original)</strong></li>
+            <li>📐 <strong>Container width</strong>: 360px → 380px → <strong>400px</strong></li>
+            <li>🎯 <strong>Result</strong>: Maximum breathing room for percentage text</li>
+            <li>👀 <strong>Readability</strong>: Even clearer percentage display</li>
+            <li>💅 <strong>Professional look</strong>: More generous spacing</li>
+        </ul>
+    </div>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Draw Statistics Frontend Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-left: 4px solid #007acc; background: #f0f8ff; }
+        .success { border-color: #28a745; background: #d4edda; }
+        .error { border-color: #dc3545; background: #f8d7da; }
+        .move-card { margin: 5px 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .stats-bar { height: 12px; border-radius: 6px; overflow: hidden; margin: 5px 0; }
+        .win-segment { background: #81c784; float: left; height: 100%; }
+        .draw-segment { background: #ffb74d; float: left; height: 100%; }
+        .loss-segment { background: #e57373; float: left; height: 100%; }
+    </style>
+</head>
+<body>
+    <h1>Chess Opening Trainer - Draw Statistics Test</h1>
+    
+    <div class="test-result">
+        <h3>Server Status</h3>
+        <p>Server should be running at: <a href="http://localhost:8000" target="_blank">http://localhost:8000</a></p>
+        <button onclick="testServerConnection()">Test Server Connection</button>
+        <div id="server-status"></div>
+    </div>
+
+    <div class="test-result">
+        <h3>Draw Statistics Test</h3>
+        <p>Testing if draw data is properly loaded and displayed...</p>
+        <button onclick="testDrawStatistics()">Test Draw Statistics</button>
+        <div id="draw-test-results"></div>
+    </div>
+
+    <div class="test-result">
+        <h3>Visual Test</h3>
+        <p>Example of how move statistics should look:</p>
+        <div class="move-card">
+            <strong>e4</strong> (9 games)
+            <div class="stats-bar">
+                <div class="win-segment" style="width: 55.6%" title="Wins: 5 (56%)"></div>
+                <div class="draw-segment" style="width: 33.3%" title="Draws: 3 (33%)"></div>
+                <div class="loss-segment" style="width: 11.1%" title="Losses: 1 (11%)"></div>
+            </div>
+            <small>Wins: 56%, Draws: 33%, Losses: 11%</small>
+        </div>
+        
+        <div class="move-card">
+            <strong>d4</strong> (2 games)
+            <div class="stats-bar">
+                <div class="win-segment" style="width: 50%" title="Wins: 1 (50%)"></div>
+                <div class="draw-segment" style="width: 50%" title="Draws: 1 (50%)"></div>
+            </div>
+            <small>Wins: 50%, Draws: 50%, Losses: 0%</small>
+        </div>
+    </div>
+
+    <script>
+        async function testServerConnection() {
+            const statusDiv = document.getElementById('server-status');
+            statusDiv.innerHTML = 'Testing connection...';
+            
+            try {
+                const response = await fetch('http://localhost:8000/api/status');
+                const data = await response.json();
+                statusDiv.innerHTML = `<span style="color: green;">✓ Server is running!</span><br>` +
+                    `Status: ${data.status}<br>` +
+                    `Players: ${data.player_count}<br>` +
+                    `Current Player: ${data.current_player || 'None'}<br>` +
+                    `Current Color: ${data.current_color || 'None'}`;
+            } catch (error) {
+                statusDiv.innerHTML = `<span style="color: red;">✗ Server connection failed: ${error.message}</span>`;
+            }
+        }
+
+        async function testDrawStatistics() {
+            const resultsDiv = document.getElementById('draw-test-results');
+            resultsDiv.innerHTML = 'Testing draw statistics...';
+            
+            try {
+                // First set a player
+                const setPlayerResponse = await fetch('http://localhost:8000/api/set_player', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ player: 'Hikaru_Nakamura', color: 'black' })
+                });
+                const setPlayerData = await setPlayerResponse.json();
+                
+                if (!setPlayerData.success) {
+                    throw new Error('Failed to set player: ' + setPlayerData.message);
+                }
+                
+                // Get moves for starting position
+                const startingFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+                const movesResponse = await fetch(`http://localhost:8000/api/moves/${encodeURIComponent(startingFen)}`);
+                const movesData = await movesResponse.json();
+                
+                if (!movesData.success) {
+                    throw new Error('Failed to get moves: ' + JSON.stringify(movesData));
+                }
+                
+                let html = `<span style="color: green;">✓ Successfully loaded moves!</span><br>`;
+                html += `Found ${movesData.moves.length} moves:<br><br>`;
+                
+                let totalDraws = 0;
+                let movesWithDraws = 0;
+                
+                movesData.moves.forEach(move => {
+                    const wins = move.wins || 0;
+                    const draws = move.draws || 0;
+                    const losses = move.losses || 0;
+                    const total = wins + draws + losses;
+                    
+                    if (draws > 0) {
+                        movesWithDraws++;
+                        totalDraws += draws;
+                    }
+                    
+                    const winPercent = total > 0 ? Math.round((wins / total) * 100) : 0;
+                    const drawPercent = total > 0 ? Math.round((draws / total) * 100) : 0;
+                    const lossPercent = total > 0 ? Math.round((losses / total) * 100) : 0;
+                    
+                    html += `<div style="margin: 5px 0; padding: 5px; background: #f9f9f9; border-radius: 3px;">`;
+                    html += `<strong>${move.san}</strong>: ${wins}W + ${draws}D + ${losses}L = ${total} games<br>`;
+                    html += `Win: ${winPercent}%, Draw: ${drawPercent}%, Loss: ${lossPercent}%`;
+                    if (draws > 0) {
+                        html += ` <span style="color: orange; font-weight: bold;">🟡 HAS DRAWS!</span>`;
+                    }
+                    html += `</div>`;
+                });
+                
+                html += `<br><strong>Summary:</strong><br>`;
+                html += `• Moves with draws: ${movesWithDraws}/${movesData.moves.length}<br>`;
+                html += `• Total draws: ${totalDraws}<br>`;
+                
+                if (movesWithDraws > 0) {
+                    html += `<span style="color: green; font-weight: bold;">✓ Draw data is working correctly!</span>`;
+                } else {
+                    html += `<span style="color: red; font-weight: bold;">✗ No draw data found - check backend!</span>`;
+                }
+                
+                resultsDiv.innerHTML = html;
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<span style="color: red;">✗ Test failed: ${error.message}</span>`;
+            }
+        }
+    </script>
+</body>
+</html>

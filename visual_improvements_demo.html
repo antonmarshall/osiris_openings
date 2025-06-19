@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Improved Chess.com Style Bars & Tooltips</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        
+        /* OLD STYLE */
+        .move-card-old {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: 360px;
+            height: 32px;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background: white;
+            margin: 4px 0;
+            font-family: inherit;
+        }
+        .stats-bar-old {
+            width: 80px;
+            height: 18px;
+            border-radius: 2px;
+            background: #e5e5e5;
+            overflow: hidden;
+            position: relative;
+            flex-shrink: 0;
+            display: flex;
+        }
+        
+        /* NEW IMPROVED STYLE */
+        .move-card-new {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: 380px;
+            height: 32px;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background: white;
+            margin: 4px 0;
+            font-family: inherit;
+        }
+        .stats-bar-new {
+            width: 100px;
+            height: 18px;
+            border-radius: 2px;
+            background: #e5e5e5;
+            overflow: hidden;
+            position: relative;
+            flex-shrink: 0;
+            display: flex;
+        }
+        
+        /* Common styles */
+        .move-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 90px;
+            flex-shrink: 0;
+        }
+        .move-text {
+            font-weight: bold;
+            font-size: 13px;
+            color: #2c3e50;
+            min-width: 40px;
+        }
+        .games-text {
+            font-size: 11px;
+            color: #666;
+            min-width: 50px;
+        }
+        .segment {
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            box-sizing: border-box;
+            float: left;
+        }
+        .segment-old { font-size: 11px; }
+        .segment-new { font-size: 11px; }
+        .win-segment { background: #81c784; }
+        .draw-segment { background: #ffb74d; }
+        .loss-segment { background: #e57373; }
+        .elo {
+            font-size: 11px;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+        .elo.positive { color: #4caf50; }
+        .elo.negative { color: #f44336; }
+        
+        .comparison {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+        }
+        
+        .tooltip-preview {
+            background: #f8f8f8;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-line;
+            border-left: 4px solid #3498db;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✨ Improved Chess.com Style Design</h1>
+        <p>Enhanced visual design with wider bars and structured tooltips</p>
+        
+        <div class="comparison">
+            <h3>📊 BEFORE: Cramped Layout (80px bar)</h3>
+            <div class="move-card-old" title="e4: 1234 Spiele
+Siege: 678 (55%)
+Remis: 401 (33%)
+Niederlagen: 155 (12%)
+Schachwertung: 72%
+ELO-Differenz: +45">
+                <div class="move-info">
+                    <span class="move-text">e4</span>
+                    <span class="games-text">(1,234)</span>
+                </div>
+                <div class="stats-bar-old">
+                    <div class="segment segment-old win-segment" style="width: 55%;">55%</div>
+                    <div class="segment segment-old draw-segment" style="width: 33%;">33%</div>
+                    <div class="segment segment-old loss-segment" style="width: 12%;">12%</div>
+                </div>
+                <span class="elo positive">+45</span>
+            </div>
+            
+            <h4>Old Tooltip:</h4>
+            <div class="tooltip-preview">e4: 1234 Spiele
+Siege: 678 (55%)
+Remis: 401 (33%)
+Niederlagen: 155 (12%)
+Schachwertung: 72%
+ELO-Differenz: +45</div>
+        </div>
+        
+        <div class="comparison">
+            <h3>🚀 AFTER: Spacious Layout (100px bar)</h3>
+            <div class="move-card-new" title="📊 e4 (1,234 Spiele)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Siege:       678 (55%)
+⚖️ Remis:       401 (33%)
+❌ Niederlagen:  155 (12%)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 ELO-Differenz: +45">
+                <div class="move-info">
+                    <span class="move-text">e4</span>
+                    <span class="games-text">(1,234)</span>
+                </div>
+                <div class="stats-bar-new">
+                    <div class="segment segment-new win-segment" style="width: 55%;">55%</div>
+                    <div class="segment segment-new draw-segment" style="width: 33%;">33%</div>
+                    <div class="segment segment-new loss-segment" style="width: 12%;">12%</div>
+                </div>
+                <span class="elo positive">+45</span>
+            </div>
+            
+            <h4>New Structured Tooltip:</h4>
+            <div class="tooltip-preview">📊 e4 (1,234 Spiele)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Siege:       678 (55%)
+⚖️ Remis:       401 (33%)
+❌ Niederlagen:  155 (12%)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 ELO-Differenz: +45</div>
+        </div>
+        
+        <h3>🎯 More Examples with New Design:</h3>
+        
+        <div class="move-card-new" title="📊 d4 (987 Spiele)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Siege:       513 (52%)
+⚖️ Remis:       395 (40%)
+❌ Niederlagen:   79 (8%)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 ELO-Differenz: +38">
+            <div class="move-info">
+                <span class="move-text">d4</span>
+                <span class="games-text">(987)</span>
+            </div>
+            <div class="stats-bar-new">
+                <div class="segment segment-new win-segment" style="width: 52%;">52%</div>
+                <div class="segment segment-new draw-segment" style="width: 40%;">40%</div>
+                <div class="segment segment-new loss-segment" style="width: 8%;"></div>
+            </div>
+            <span class="elo positive">+38</span>
+        </div>
+        
+        <div class="move-card-new" title="📊 Nf3 (456 Spiele)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Siege:       205 (45%)
+⚖️ Remis:       205 (45%)
+❌ Niederlagen:   46 (10%)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 ELO-Differenz: +22">
+            <div class="move-info">
+                <span class="move-text">Nf3</span>
+                <span class="games-text">(456)</span>
+            </div>
+            <div class="stats-bar-new">
+                <div class="segment segment-new win-segment" style="width: 45%;">45%</div>
+                <div class="segment segment-new draw-segment" style="width: 45%;">45%</div>
+                <div class="segment segment-new loss-segment" style="width: 10%;">10%</div>
+            </div>
+            <span class="elo positive">+22</span>
+        </div>
+        
+        <h3>✨ Improvements Summary:</h3>
+        <ul>
+            <li>🎯 <strong>Wider bar</strong>: 80px → 100px (+25% more space)</li>
+            <li>🗑️ <strong>Removed clutter</strong>: No redundant "Schachwertung" percentage</li>
+            <li>📊 <strong>Visual structure</strong>: Icons, separators, aligned layout</li>
+            <li>💅 <strong>Professional look</strong>: Clean, consistent, appealing</li>
+            <li>📱 <strong>Better readability</strong>: More breathing room for percentages</li>
+            <li>🔢 <strong>Number formatting</strong>: Proper thousand separators</li>
+        </ul>
+    </div>
+</body>
+</html>
