@@ -92,10 +92,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Central configuration for Chessground board
   const config = {
-    draggable: false,           // ❌ DISABLE: No drag & drop - click-to-move only
+    draggable: {
+      enabled: true,       // Core setting to enable dragging system for animations
+      showGhost: false     // Do not show a 'ghost' piece during animations
+    },
     orientation: 'white',       // Default: white on bottom
     viewOnly: false,
     disableContextMenu: true,
+    animation: {
+      enabled: true,
+      duration: 200 // Use a subtle animation duration
+    },
     highlight: {
       lastMove: true,
       check: true,
@@ -192,9 +199,10 @@ document.addEventListener('DOMContentLoaded', () => {
    * Flip board orientation
    */
   function flipBoard() {
-    const newOrient = cg.state.orientation === 'white' ? 'black' : 'white';
-    cg.set({ orientation: newOrient });
-  }  /**
+    cg.toggleOrientation();
+  }
+
+  /**
    * Map backend color to Chessground brush name
    * @param {string} backendColor - Hex color from backend (e.g., '#4caf50')
    * @param {boolean} isRepertoire - Whether this is a repertoire move
