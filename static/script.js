@@ -93,6 +93,14 @@ async function loadPlayers() {
     defaultOption.textContent = 'Spieler auswählen...';
     select.appendChild(defaultOption);
     
+    // Add "My Repertoire" option if repertoire directories exist
+    if (data.has_repertoire) {
+        const repertoireOption = document.createElement('option');
+        repertoireOption.value = "My Repertoire";
+        repertoireOption.textContent = "My Repertoire";
+        select.appendChild(repertoireOption);
+    }
+    
     // Add player options
     data.players.forEach(player => {
       const option = document.createElement('option');
@@ -117,6 +125,17 @@ async function loadPlayers() {
 function displayAnalysisResults(data, playerName, color) {
   console.log('🎨 Displaying analysis results for', playerName, color);
   
+  // --- NEW: Control Repertoire Switch Visibility ---
+  const repertoireControls = document.getElementById('repertoireControls');
+  if (repertoireControls) {
+    if (playerName === "My Repertoire") {
+      repertoireControls.style.display = 'block';
+    } else {
+      repertoireControls.style.display = 'none';
+    }
+  }
+  // --- END NEW ---
+
   // --- Initialize Navigation State (Schritt 3.1) ---
   appState.currentPlayer = playerName;
   appState.currentColor = color;
@@ -1069,6 +1088,18 @@ function setupEventListeners() {
     console.log('✅ Flip board button event listener added');
   }
   
+  // --- NEW: Add listener for the repertoire switch ---
+  const saveSwitch = document.getElementById('saveToRepertoireSwitch');
+    if (saveSwitch) {
+        saveSwitch.addEventListener('change', (event) => {
+            const isChecked = event.target.checked;
+            console.log(`💾 Save to Repertoire switch changed. New state: ${isChecked ? 'ON' : 'OFF'}`);
+            // NEW: Add a class to the parent for styling
+            event.target.closest('.toggle-switch').classList.toggle('active', isChecked);
+        });
+    }
+  // --- END NEW ---
+
   // ====================================================================
   // DRAG & DROP INTEGRATION (Backend-Focused Navigation)
   // ====================================================================

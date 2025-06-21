@@ -400,3 +400,18 @@ input[type="radio"]:checked::after {
     transform-origin: center;
   }
 }
+
+.stats-below-board {
+  border-top: 1px solid #eee;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+/* --- Repertoire Toggle Switch Styles --- */
+#saveToRepertoireSwitch:checked + .toggle-slider {
+  transform: translateX(20px);
+}
+
+.toggle-switch.active {
+    background-color: #27ae60 !important; /* Use important to override inline style */
+}
