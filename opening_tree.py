@@ -94,10 +94,11 @@ class Node:
         else:
             return "#f44336"    # Red for poor (below 35%)
     
-    def to_dict(self, perspective_color_str: str, include_children: bool = True, max_depth: int = 20, current_depth: int = 0) -> Dict[str, Any]:
+    def to_dict(self, perspective_color_str: str, include_children: bool = True, max_depth: int = 20, current_depth: int = 0, is_repertoire: bool = False) -> Dict[str, Any]:
         # perspective_color_str helps interpret 'wins', 'draws', 'losses' if they were stored
         # from a neutral point of view. Here, they are stored from self.player_name's view.
         win_rate = self.get_win_rate()
+        color = self.get_move_color(is_repertoire)
         result = {
             'fen': self.fen,
             'move_san': self.move_san, # The move (SAN) that led to this FEN from parent
@@ -107,11 +108,12 @@ class Node:
             'draws': self.draws,
             'losses': self.losses,
             'win_rate': round(win_rate, 2),
+            'color': color,
             'game_info': self.games_info[:10] # Limit game_info for brevity
         }
           # Only include children if requested, within depth limit, and we have children
         if include_children and current_depth < max_depth and self.children:
-            result['children'] = {uci: child.to_dict(perspective_color_str, include_children, max_depth, current_depth + 1) 
+            result['children'] = {uci: child.to_dict(perspective_color_str, include_children, max_depth, current_depth + 1, is_repertoire) 
                                 for uci, child in self.children.items()}
         else:
             result['children'] = {}
@@ -393,53 +395,41 @@ class OpeningTree:
             try:
                 move = board_at_fen.parse_uci(move_uci)
                 move_san = board_at_fen.san(move)
-            except ValueError:  # Should not happen if UCI is valid and board is in sync
+            except ValueError:
                 logger.error(f"Could not parse UCI move '{move_uci}' from FEN '{fen}'. Using UCI as SAN.")
-                move_san = move_uci # Fallback
-              # Child node stats are already from the perspective of self.player_name
-            child_stats = child_node_obj.to_dict(display_perspective, include_children=False, max_depth=1)
-            
-            # Calculate color using child_stats data (has correct win_rate)
-            win_rate = child_stats.get('win_rate', 0.0)
-            if self.own_repertoir:
-                color = "#4caf50"  # Green for repertoire moves
-            elif win_rate >= 65:
-                color = "#4caf50"    # Green for excellent (65%+)
-            elif win_rate >= 55:
-                color = "#8bc34a"    # Light green for good (55-64%)
-            elif win_rate >= 45:
-                color = "#ffeb3b"    # Yellow for average (45-54%)
-            elif win_rate >= 35:
-                color = "#ff9800"    # Orange for below average (35-44%)
-            else:
-                color = "#f44336"    # Red for poor (below 35%)
+                move_san = move_uci
 
-            # Calculate arrow thickness (opacity now handled by Chessground brushes)
+            child_stats = child_node_obj.to_dict(
+                display_perspective, 
+                include_children=False, 
+                is_repertoire=self.own_repertoir
+            )
+            
+            color = child_stats.get('color', '#9e9e9e')
+
             if max_games > min_games:
                 thickness = 4 + 8 * ((child_node_obj.games - min_games) / (max_games - min_games))
             else:
                 thickness = 6
 
-            # Calculate draw_rate and lose_rate for frontend
             total_games = child_stats.get('games', 1)
             wins = child_stats.get('wins', 0)
             draws = child_stats.get('draws', 0)
             losses = child_stats.get('losses', 0)
             
             draw_rate = (draws / total_games) * 100 if total_games > 0 else 0
-            lose_rate = (losses / total_games) * 100 if total_games > 0 else 0            # Calculate average ELO difference if data available
+            lose_rate = (losses / total_games) * 100 if total_games > 0 else 0
+            
             avg_elo_diff = None
-            if move_uci in current_node_obj.elo_diff_sum and move_uci in current_node_obj.elo_diff_count:
-                if current_node_obj.elo_diff_count[move_uci] > 0:
-                    avg_elo_diff = current_node_obj.elo_diff_sum[move_uci] / current_node_obj.elo_diff_count[move_uci]
+            if move_uci in current_node_obj.elo_diff_sum and current_node_obj.elo_diff_count.get(move_uci, 0) > 0:
+                avg_elo_diff = current_node_obj.elo_diff_sum[move_uci] / current_node_obj.elo_diff_count[move_uci]
 
-            # Process move dates for year counts
             move_year_counts = {}
             if move_uci in current_node_obj.move_dates:
                 for date_str in current_node_obj.move_dates[move_uci]:
                     try:
                         year = int(date_str.split('.')[2]) if '.' in date_str else int(date_str[:4])
-                        if 1900 <= year <= 2030:  # Sanity check
+                        if 1900 <= year <= 2030:
                             move_year_counts[year] = move_year_counts.get(year, 0) + 1
                     except (ValueError, IndexError):
                         continue
@@ -448,20 +438,23 @@ class OpeningTree:
                 "uci": move_uci,
                 "san": move_san,
                 "fen_after_move": child_node_obj.fen,
-                "fen": child_node_obj.fen,  # For compatibility
-                "games": child_stats.get('games',0),
-                "wins": child_stats.get('wins',0),
-                "draws": child_stats.get('draws',0),
-                "losses": child_stats.get('losses',0),
-                "win_rate": child_stats.get('win_rate',0.0),
+                "fen": child_node_obj.fen,
+                "games": child_stats.get('games', 0),
+                "wins": wins,
+                "draws": draws,
+                "losses": losses,
+                "win_rate": child_stats.get('win_rate', 0.0),
                 "draw_rate": round(draw_rate, 1),
                 "lose_rate": round(lose_rate, 1),
                 "avg_elo_diff": round(avg_elo_diff, 1) if avg_elo_diff is not None else None,
                 "move_year_counts": move_year_counts,
-                "dates": current_node_obj.move_dates.get(move_uci, []),                "parent_move_occurrences": current_node_obj.move_counts.get(move_uci, 0),
-                "children_count": len(child_node_obj.children),  # Add children count                "color": color,                # Hex color from backend
+                "dates": current_node_obj.move_dates.get(move_uci, []),
+                "parent_move_occurrences": current_node_obj.move_counts.get(move_uci, 0),
+                "children_count": len(child_node_obj.children),
+                "color": color,
                 "thickness": thickness,
-                "game_info": child_node_obj.games_info[0] if child_node_obj.games_info else None})
+                "game_info": child_node_obj.games_info[0] if child_node_obj.games_info else None
+            })
         
         # Optionally sort moves, e.g., by number of games or occurrences
         moves_data.sort(key=lambda x: x.get("parent_move_occurrences", 0), reverse=True)
