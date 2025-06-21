@@ -113,8 +113,13 @@ class Node:
         }
           # Only include children if requested, within depth limit, and we have children
         if include_children and current_depth < max_depth and self.children:
-            result['children'] = {uci: child.to_dict(perspective_color_str, include_children, max_depth, current_depth + 1, is_repertoire) 
-                                for uci, child in self.children.items()}
+            result['children'] = {uci: child.to_dict(
+                perspective_color_str, 
+                include_children, 
+                max_depth, 
+                current_depth + 1, 
+                is_repertoire
+            ) for uci, child in self.children.items()}
         else:
             result['children'] = {}
         
@@ -126,41 +131,35 @@ class OpeningTree:
     (Stellungen und Züge mit statistischen Erfolgsdaten).
     """
     def __init__(self, player_name: Optional[str] = None, initial_perspective_color: str = 'white', own_repertoir: bool = False):
-        self.root_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1"  # Normalized starting FEN
+        self.root_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         self.player_name = player_name
-        self.current_perspective_color = initial_perspective_color.lower() # Perspective for which the tree is built
-        self.own_repertoir = own_repertoir  # True for repertoire players (white_repertoir, black_repertoir)
+        self.current_perspective_color = initial_perspective_color.lower()
+        self.own_repertoir = own_repertoir
         self.nodes: Dict[str, Node] = {}
+        
         root_node_obj = Node(self.root_fen)
-        self.nodes[self.root_fen] = root_node_obj
+        # Store the root node using its full FEN as the key, since it's the absolute start
+        self.nodes[self._get_node_key(self.root_fen)] = root_node_obj
         
         self.processed_files: Set[str] = set()
-        # player_color_map might be useful if tree stores games from multiple perspectives simultaneously
         self.player_color_map: Dict[str, str] = {} 
-
-        # tree_dict and nodes_by_fen are deprecated in favor of self.nodes holding Node objects.
-        # They can be populated on-demand when needed for serialization.
         self.tree_dict: Dict[str, Dict[str, Any]] = {}
         self.nodes_by_fen: Dict[str, Dict[str, Any]] = {}
         
         logger.info(f"OpeningTree initialized for player: {self.player_name}, perspective: {self.current_perspective_color}. Root FEN: {self.root_fen}")
 
-    def normalize_fen(self, fen: str) -> str:
+    def _get_node_key(self, fen: str) -> str:
         """
-        Normalisiert eine FEN-String für Tree-Lookups, entfernt en passant, castling rights, etc.
-        Behält nur Figurenpositionen und wer am Zug ist.
+        Creates a key for the node dictionary by using the FEN without half/full move counts.
+        This allows for transpositions to be treated as the same node.
         """
         try:
-            board = chess.Board(fen)
-            # Erstelle normalisierte FEN: nur Figuren + aktiver Spieler + 0 0 (Halbzüge und Vollzüge auf 0)
-            fen_parts = board.fen().split(' ')
-            # Format: pieces turn castling en_passant halfmove fullmove
-            # Wir behalten: pieces turn, setzen castling="-", en_passant="-", halfmove="0", fullmove="1"
-            normalized = f"{fen_parts[0]} {fen_parts[1]} - - 0 1"
-            return normalized
+            # Key consists of piece placement, active color, castling availability, and en-passant square.
+            return ' '.join(fen.split(' ')[:4])
         except Exception as e:
-            logger.error(f"Error normalizing FEN '{fen}': {e}")
-            return fen  # Return original if normalization fails
+            logger.error(f"Error creating node key for FEN '{fen}': {e}")
+            # Fallback to the original FEN if splitting fails
+            return fen
 
     def _create_node_data(self, fen: str, games: int, wins: int, draws: int, losses: int,
                           children: Dict[str, str], move_san: Optional[str], game_info_list: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -289,94 +288,91 @@ class OpeningTree:
         """
         
         # Determine player's ELO and opponent's ELO for this game
-        player_elo_for_game = 0
-        opponent_elo_for_game = 0
-        if player_actual_color_in_game == 'white':
-            player_elo_for_game = white_elo
-            opponent_elo_for_game = black_elo
-        elif player_actual_color_in_game == 'black':
-            player_elo_for_game = black_elo
-            opponent_elo_for_game = white_elo
+        player_elo_for_game = black_elo
+        opponent_elo_for_game = white_elo
 
-        # Board for replaying moves and generating SAN/FEN for tree nodes
-        # This board always starts from the standard initial position for tree construction.
-        # Moves from pgn_game are applied one by one.
-        current_board_in_tree = chess.Board() 
-        current_node_in_tree = self.nodes[self.root_fen] # Start from the tree's root Node object
+        # --- CORE LOGIC FIX ---
+        # 1. Start from the board position defined in the PGN (respects FEN headers)
+        game_board = pgn_game.board()
 
-        # Apply moves from the PGN game to our tree
-        for move_index, move in enumerate(pgn_game.mainline_moves()):
+        # Find the starting node in our tree. It must exist.
+        start_node_key = self._get_node_key(game_board.fen())
+        current_node_in_tree = self.nodes.get(start_node_key)
+        
+        if current_node_in_tree is None:
+            # This can happen if a PGN starts from a position not yet in the tree
+            # or if the root FEN itself is non-standard.
+            logger.warning(f"Game in {pgn_file_path} starts from a FEN not in tree: {game_board.fen()}. Skipping.")
+            return
+
+        # 2. Iterate through the game, using the game object to handle board state
+        for move in pgn_game.mainline_moves():
             parent_node_in_tree = current_node_in_tree
             move_uci = move.uci()
-            try:
-                move_san = current_board_in_tree.san(move)
-                current_board_in_tree.push(move)
-            except Exception as e:
-                logger.error(f"❌ Error processing move {move_index + 1} in {pgn_file_path}:")
-                logger.error(f"    Move UCI: {move_uci}")
-                logger.error(f"    Board FEN before move: {current_board_in_tree.fen()}")
-                logger.error(f"    Error: {e}")
-                logger.error(f"    Game headers: White='{game_details.get('White', 'N/A')}', Black='{game_details.get('Black', 'N/A')}', Result='{game_details.get('Result', 'N/A')}'")
-                logger.error(f"⏭️  Skipping rest of game due to illegal move.")
-                break
             
-            # Normalize FEN for consistent tree storage
-            new_fen_in_tree = self.normalize_fen(current_board_in_tree.fen())
-            child_node_obj = self.nodes.get(new_fen_in_tree)
+            # The board is updated by the iteration, so we get the SAN before pushing
+            move_san = game_board.san(move)
+            game_board.push(move) # This advances the game_board's internal state
+
+            # 3. Use the new, correct board state to create/find nodes
+            full_fen_after_move = game_board.fen()
+            node_key = self._get_node_key(full_fen_after_move)
+
+            child_node_obj = self.nodes.get(node_key)
             if child_node_obj is None:
-                child_node_obj = Node(new_fen_in_tree, move_san=move_san, parent_fen=parent_node_in_tree.fen)
-                self.nodes[new_fen_in_tree] = child_node_obj
+                child_node_obj = Node(full_fen_after_move, move_san=move_san, parent_fen=parent_node_in_tree.fen)
+                self.nodes[node_key] = child_node_obj
+            
             parent_node_in_tree.add_child(move_uci, child_node_obj)
             child_node_obj.increment_game_stats(result_for_player, game_details, skip_stats, self.own_repertoir)
             
             # Track source file for this node
             child_node_obj.source_files.add(pgn_file_path)
             
+            # Update stats on the parent node for the move made
             parent_node_in_tree.move_counts[move_uci] = parent_node_in_tree.move_counts.get(move_uci, 0) + 1
             if not skip_stats:
                 parent_node_in_tree.elo_diff_sum[move_uci] = parent_node_in_tree.elo_diff_sum.get(move_uci, 0) + (player_elo_for_game - opponent_elo_for_game)
                 parent_node_in_tree.elo_diff_count[move_uci] = parent_node_in_tree.elo_diff_count.get(move_uci, 0) + 1
                 parent_node_in_tree.move_dates.setdefault(move_uci, []).append(game_details.get("Datum", "?"))
-            # --- LOG: Nach jedem Zug die Children des aktuellen Knotens ausgeben ---
-            if move_index == 0 or move_index == len(list(pgn_game.mainline_moves()))-1 or move_index < 5:
-                children = parent_node_in_tree.children
-                if children:
-                    log_lines = [
-                        f"    ├─ {self.nodes[child.fen].move_san or uci:<6} | Games: {child.games:<3} | Win%: {child.get_win_rate():5.1f}"
-                        for uci, child in children.items()
-                    ]
-                    logger.info(f"\n[Tree] Nach Zug '{move_san}':\n" + "\n".join(log_lines))
+
+            # Set the current node for the next iteration
             current_node_in_tree = child_node_obj
         
         # Mark PGN file as processed for this tree instance if needed
         self.processed_files.add(pgn_file_path)
+
     def get_tree_data(self, fen: str, perspective_color_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Retrieves the dictionary representation of a node and its children.
         Perspective color string determines how win rates are interpreted if they were neutral.
         (Here, stats are already from player's perspective).
         """
-        # Use normalized FEN for lookup
-        normalized_fen = self.normalize_fen(fen)
-        node_obj = self.nodes.get(normalized_fen) or self.nodes.get(fen)
+        node_key = self._get_node_key(fen)
+        node_obj = self.nodes.get(node_key)
+        
         if node_obj:
             # Use the tree's current perspective if none is provided for display
             display_perspective = perspective_color_str or self.current_perspective_color
-            return node_obj.to_dict(display_perspective, include_children=True, max_depth=10)
-        logger.info(f"🔍 Node nicht gefunden für FEN: {fen[:50]}... (normalized: {normalized_fen[:50]}...) in get_tree_data")
+            return node_obj.to_dict(
+                display_perspective, 
+                include_children=True, 
+                max_depth=10, 
+                is_repertoire=self.own_repertoir
+            )
+        logger.warning(f"🔍 Node not found for FEN: {fen[:50]}... (key: {node_key}) in get_tree_data")
         return None
 
     def get_moves_from_position(self, fen: str, perspective_color_str: Optional[str] = None) -> Dict[str, Any]:
         """
         Returns data for the given FEN and all direct child moves.
-        """        # Normalisiere die FEN für Tree-Lookup (entferne en passant, castling, etc.)
-        normalized_fen = self.normalize_fen(fen)
-        # Versuche erst mit normalisierter FEN, dann mit Original-FEN
-        current_node_obj = self.nodes.get(normalized_fen) or self.nodes.get(fen)
+        """
+        node_key = self._get_node_key(fen)
+        current_node_obj = self.nodes.get(node_key)
         display_perspective = perspective_color_str or self.current_perspective_color
 
         if not current_node_obj:
-            logger.info(f"🔍 Node nicht gefunden für FEN: {fen[:50]}... (normalized: {normalized_fen[:50]}...) in get_moves_from_position")
+            logger.warning(f"🔍 Node not found for FEN: {fen[:50]}... (key: {node_key}) in get_moves_from_position")
             return {"fen": fen, "error": "Position not found in tree", "moves": [], "node_stats": {}}
 
         # DEBUG: Log tree context
@@ -386,7 +382,9 @@ class OpeningTree:
         node_data = current_node_obj.to_dict(display_perspective, include_children=False, max_depth=1) # Stats of the current FEN
 
         moves_data = []
-        board_at_fen = chess.Board(fen) # Board needed to correctly SAN parse UCI moves from this FEN        # Pre-calculate game counts for thickness calculation
+        board_at_fen = chess.Board(current_node_obj.fen) # Use the node's full FEN
+        
+        # Pre-calculate game counts for thickness calculation
         game_counts = [child_node_obj.games for child_node_obj in current_node_obj.children.values()]
         max_games = max(game_counts) if game_counts else 1
         min_games = min(game_counts) if game_counts else 0
@@ -516,7 +514,7 @@ class OpeningTree:
         def node_summary(node, move_san=None):
             return f"{move_san or ''} [Games: {node.games}, Win%: {node.get_win_rate():.1f}]"
         queue = deque()
-        root = self.nodes.get(self.root_fen)
+        root = self.nodes.get(self._get_node_key(self.root_fen))
         if not root:
             print("[print_tree] Kein Root-Knoten gefunden.")
             return
@@ -539,8 +537,8 @@ class OpeningTree:
         """
         Returns the set of files that contributed moves leading to this position.
         """
-        normalized_fen = self.normalize_fen(fen)
-        node = self.nodes.get(normalized_fen)
+        node_key = self._get_node_key(fen)
+        node = self.nodes.get(node_key)
         if node:
             return node.source_files.copy()
         return set()
