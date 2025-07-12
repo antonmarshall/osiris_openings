@@ -37,6 +37,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       console.log(`⚠️ appState or availableMoves not available for legal move check`);    }
+    // Nach dem Selektieren: Zugpfeile anzeigen
+    if (typeof window.showAvailableMovesArrows === 'function') {
+      window.showAvailableMovesArrows(window.appState.availableMoves || []);
+    }
   }
 
   /**
@@ -59,13 +63,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = game.move({ from, to });
       if (!result) {
         // Invalid move: reset position and return
-        cg.set({ fen: game.fen(), movable: { free: false, color: config.movable.color } });
+        cg.set({ fen: game.fen(), movable: { free: false, color: config.movable.color }, drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
+        console.log('[DEBUG] cg.set called (invalid move fallback):', { fen: game.fen(), movable: { free: false, color: config.movable.color }, drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
         console.log('❌ Invalid move rejected by Chess.js');
         return;
       }
       
       // Update board position and highlight
-      cg.set({ fen: game.fen(), lastMove: [from, to] });
+      cg.set({ fen: game.fen(), lastMove: [from, to], drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
+      console.log('[DEBUG] cg.set called (move validated fallback):', { fen: game.fen(), lastMove: [from, to], drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
       console.log('✅ Move validated by Chess.js (fallback mode)');
     }
   }
@@ -181,8 +187,10 @@ document.addEventListener('DOMContentLoaded', () => {
         dests: dests,
         color: 'both',
         showDests: true
-      } 
+      },
+      drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes }
     });
+    console.log('[DEBUG] cg.set called (updateLegalMovesFromBackend):', { movable: { dests, color: 'both', showDests: true }, drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
     
     console.log(`✅ Updated legal moves: ${dests.size} pieces with legal moves`);
   }
@@ -192,7 +200,8 @@ document.addEventListener('DOMContentLoaded', () => {
    */
   function resetBoard() {
     game.reset();
-    cg.set({ fen: game.fen(), orientation: 'white' });
+    cg.set({ fen: game.fen(), orientation: 'white', drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
+    console.log('[DEBUG] cg.set called (resetBoard):', { fen: game.fen(), orientation: 'white', drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
   }
 
   /**

@@ -18,7 +18,8 @@ let appState = {
   moveHistory: [],           // Array von {move, fen, stats}
   currentPosition: CONFIG.DEFAULT_FEN,  // Aktuelle FEN
   availableMoves: [],        // Verfügbare Züge von Backend
-  isNavigating: false        // Flag für Navigation-State
+  isNavigating: false,        // Flag für Navigation-State
+  boardOrientation: 'white', // Track user-selected orientation
 };
 
 // ✅ CRITICAL FIX: Expose appState globally for script-cg.js access
@@ -241,6 +242,7 @@ function displayAnalysisResults(data, playerName, color) {
   // Then update Chessground legal moves (AFTER appState is updated)
   if (typeof window.updateLegalMovesFromBackend === 'function') {
     window.updateLegalMovesFromBackend();
+    showAvailableMovesArrows(appState.availableMoves || []);
   }
   
   console.log('✅ Results displayed successfully');
@@ -342,18 +344,18 @@ function renderChessBoard(fen, playerColor = 'white') {
     console.log('🎨 Rendering chess board with FEN:', fen.substring(0, 30) + '...');
       // Use the global Chessground instance from script-cg.js
     if (typeof window.cg !== 'undefined') {
-      // Set board orientation based on player color
-      const orientation = getBoardOrientation(playerColor);
+      // Use persisted orientation
+      const orientation = appState.boardOrientation;
       
       // ✅ CRITICAL FIX: Preserve existing movable configuration when updating FEN
       const currentMovable = window.cg.state.movable;
       
       // Update the Chessground board while preserving legal moves
-      window.cg.set({
+      updateBoardAndArrows({
         fen: fen,
         orientation: orientation,
         movable: currentMovable  // ✅ Preserve legal moves (dests) and other movable settings
-      });
+      }, 'renderChessBoard');
         console.log('✅ Board rendered successfully with Chessground, orientation:', orientation);
       console.log('✅ Legal moves preserved:', currentMovable?.dests?.size || 0, 'pieces');
       
@@ -389,10 +391,10 @@ function clearChessBoard() {
   if (typeof window.cg !== 'undefined') {
     // ✅ PRESERVE legal moves when clearing board
     const currentMovable = window.cg.state.movable;
-    window.cg.set({ 
+    updateBoardAndArrows({
       fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-      movable: currentMovable  // Preserve legal moves
-    });
+      movable: currentMovable
+    }, 'clearChessBoard');
     console.log('🧹 Chessboard cleared to starting position');
   }
 }
@@ -424,6 +426,9 @@ async function initializeApp() {
     
     // Setup additional UI event listeners
     setupEventListeners();
+    
+    // Set initial orientation based on player color
+    appState.boardOrientation = getBoardOrientation(appState.currentColor || 'white');
     
   } else {
     console.log('❌ App startup failed - Backend not reachable');
@@ -500,7 +505,7 @@ async function handleMoveClick(event) {
   }
   
   console.log('♟️ Move clicked:', formatMoveDisplay(move), 'Index:', moveIndex);
-  
+
   try {
     // Set navigation flag
     appState.isNavigating = true;
@@ -536,6 +541,8 @@ async function handleMoveClick(event) {
       console.error('❌ Could not calculate new position');
     }
     
+    // Log full Chessground state after move
+    logFullChessgroundState('after move');
   } catch (error) {
     console.error('❌ Error in move navigation:', error);
   } finally {
@@ -680,6 +687,7 @@ async function loadMovesForPosition(fen) {
       // ✅ NEW: Update Chessground legal moves for click-to-move
       if (typeof window.updateLegalMovesFromBackend === 'function') {
         window.updateLegalMovesFromBackend();
+        showAvailableMovesArrows(appState.availableMoves || []);
       }
       
       console.log('✅ Loaded', data.moves?.length || 0, 'moves for new position');
@@ -696,14 +704,12 @@ async function loadMovesForPosition(fen) {
  * Highlight the move that was just played (Schritt 3.5 - nur Squares, keine Pfeile)
  */
 function highlightPlayedMove(move) {
-  // Clear previous highlights and arrows
+  // Clear previous highlights
   clearHighlights();
-  clearArrows(); // Entferne alle Pfeile
-  
+  // clearArrows(); // Entferne alle Pfeile (entfernt)
   // Extract from/to squares from move
   const fromSquare = move.uci ? move.uci.substring(0, 2) : null;
   const toSquare = move.uci ? move.uci.substring(2, 4) : null;
-  
   if (fromSquare && toSquare) {
     setTimeout(() => {
       // Nur Square-Highlights, KEINE Pfeile
@@ -711,7 +717,6 @@ function highlightPlayedMove(move) {
         { square: fromSquare, type: 'from' },
         { square: toSquare, type: 'to' }
       ]);
-      
       console.log('🎨 Highlighted move (squares only):', fromSquare, '→', toSquare);
     }, 200);
   }
@@ -820,42 +825,66 @@ async function handleBackClick() {
     console.warn('⚠️ No move history to go back to');
     return;
   }
-  
-  console.log('⬅️ Going back to previous position...');
-  
+  console.log('⬅️ [BACK] Initiating robust backend-driven navigation (in-place reset)...');
   try {
-    // Get previous state
+    // 1. Pop previous state
     const previousState = appState.moveHistory.pop();
-    
-    // Update app state
-    appState.currentPosition = previousState.fen;
-    appState.availableMoves = previousState.moves;
-      // Update board
-    renderChessBoard(previousState.fen, appState.currentColor);
-    
-    // Clear move highlights and arrows
-    clearHighlights();
-    clearArrows();
-    
-    // Update moves list
-    updateMovesList(previousState.moves);
-    
-    // Update position info
-    const positionInfo = document.getElementById('positionInfo');
-    if (positionInfo) {
-      positionInfo.innerHTML = `
-        <strong>Player:</strong> ${appState.currentPlayer} (${appState.currentColor}) | 
-        <strong>Position:</strong> ${previousState.fen.substring(0, 30)}...
-      `;
+    const previousFen = previousState.fen;
+    const player = appState.currentPlayer;
+    const color = appState.currentColor;
+    console.log('⬅️ [BACK] Previous FEN:', previousFen);
+    // 2. Fetch all state for previous FEN from backend
+    const response = await fetch('/api/find_moves', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player, color, fen: previousFen })
+    });
+    if (!response.ok) throw new Error('Backend /api/find_moves failed');
+    const data = await response.json();
+    console.log('⬅️ [BACK] Backend data received:', data);
+    // 3. In-place board/UI reset (no destroy/re-init)
+    appState.currentPosition = previousFen;
+    appState.availableMoves = data.moves || [];
+    // Build dests from backend moves
+    let dests = {};
+    if (typeof buildRepertoireDests === 'function') {
+      dests = buildRepertoireDests(data.moves || []);
+    } else {
+      (data.moves || []).forEach(move => {
+        if (move.uci && move.uci.length >= 4) {
+          const from = move.uci.substring(0, 2);
+          const to = move.uci.substring(2, 4);
+          if (!dests[from]) dests[from] = [];
+          dests[from].push(to);
+        }
+      });
     }
-    
-    // Update back button state
+    // Convert dests to Map if not already a Map
+    const destsMap = dests instanceof Map ? dests : new Map(Object.entries(dests));
+    // Extract turn color from FEN for movable.color
+    const fenTurn = previousFen.split(' ')[1] === 'w' ? 'white' : 'black';
+    updateBoardAndArrows({
+      fen: previousFen,
+      orientation: appState.boardOrientation, // use persisted orientation
+      turnColor: fenTurn, // <-- Ensure turnColor matches FEN
+      movable: { color: fenTurn, dests: destsMap, free: false }
+    }, 'handleBackClick');
+    logFullChessgroundState('after back');
+    clearArrows();
+    clearHighlights();
+    clearCircles();
+    showAvailableMovesArrows(data.moves || []);
+    updateMovesList(data.moves || []);
+    updatePositionStats(data.stats || {});
+    if (typeof logFullBoardStateContext === 'function') {
+      logFullBoardStateContext('AFTER BACK (in-place reset)');
+    }
     updateBackButton(appState.moveHistory.length > 0);
-    
-    console.log('✅ Successfully went back to previous position');
-    
+    console.log('[BACK] In-place board/UI reset complete.');
+    // Log updated state
+    console.log('[BACK] Updated Chessground state:', window.cg.state);
   } catch (error) {
-    console.error('❌ Error going back:', error);
+    console.error('❌ [BACK] Error during robust back navigation (in-place):', error);
   }
 }
 
@@ -913,11 +942,12 @@ function flipBoard() {
     return;
   }
   
-  const currentOrientation = window.cg.state.orientation;
+  const currentOrientation = appState.boardOrientation;
   const newOrientation = currentOrientation === 'white' ? 'black' : 'white';
+  appState.boardOrientation = newOrientation;
   
   console.log(`🔄 Flipping board from ${currentOrientation} to ${newOrientation}`);
-  window.cg.set({ orientation: newOrientation });
+  updateBoardAndArrows({ orientation: newOrientation }, 'flipBoard');
 }
 
 /**
@@ -1020,10 +1050,12 @@ function clearArrows() {
   if (typeof window.cg === 'undefined') {
     return;
   }
-  
   try {
-    window.cg.setShapes([]);
-    console.log('🧹 Cleared all arrows with Chessground');
+    // Nur System-Pfeile (system: true) löschen, User-Pfeile erhalten
+    const shapes = window.cg.state.drawable.shapes || [];
+    const userShapes = shapes.filter(shape => !shape.system);
+    window.cg.setShapes(userShapes);
+    console.log('🧹 Cleared all system arrows, user arrows remain');
   } catch (error) {
     console.error('❌ Error clearing arrows:', error);
   }
@@ -1114,8 +1146,8 @@ function setupEventListeners() {
     
     try {
       // ARCHITECTURE: Find move in Backend-provided available moves
-      const uciMove = from + to;
-      const matchingMove = appState.availableMoves.find(move => 
+    const uciMove = from + to;
+    const matchingMove = appState.availableMoves.find(move => 
         move.uci === uciMove || 
         (move.uci && move.uci.startsWith(uciMove)) || // Handle promotion moves
         isEquivalentMove(from, to, move)
@@ -1150,7 +1182,7 @@ function setupEventListeners() {
       console.error('❌ Error processing click-to-move:', error);
       
       // ENHANCEMENT: Reset board on error
-      renderChessBoard(appState.currentPosition, appState.currentColor);
+              renderChessBoard(appState.currentPosition, appState.currentColor);
       showMoveError('Error processing move. Board reset to current position.');
     }
   }
@@ -1196,7 +1228,7 @@ function setupEventListeners() {
  * BUG-FIX: Batch arrow addition to prevent timing conflicts
  */
 function showAvailableMovesArrows(moves) {
-  // Clear existing arrows first
+  // Clear existing system arrows first
   clearArrows();
   
   if (!moves || moves.length === 0) {
@@ -1230,7 +1262,8 @@ function showAvailableMovesArrows(moves) {
       newArrows.push({
         orig: fromSquare,
         dest: toSquare,
-        brush: brushName
+        brush: brushName,
+        system: true
       });
       
       console.log(`🏹 Arrow ${index + 1}: ${fromSquare}→${toSquare} | Backend Color: ${backendColor} | Brush: ${brushName} | Games: ${move.games} | Win%: ${move.win_rate?.toFixed(1)}%`);
@@ -1239,8 +1272,10 @@ function showAvailableMovesArrows(moves) {
   
   // BUG-FIX: Add all arrows in one batch operation
   try {
-    window.cg.setShapes([...currentShapes, ...newArrows]);
-    console.log(`✅ All ${newArrows.length} available move arrows displayed with backend intelligence`);
+    // User-Pfeile erhalten, System-Pfeile hinzufügen
+    const userShapes = currentShapes.filter(shape => !shape.system);
+    window.cg.setShapes([...userShapes, ...newArrows]);
+    console.log(`✅ All ${newArrows.length} available move arrows displayed with backend intelligence, user arrows preserved`);
   } catch (error) {
     console.error('❌ Error adding batch arrows:', error);
     console.error('Arrow data:', newArrows);
@@ -1507,4 +1542,72 @@ window.debugClickToMove = function() {
   console.log('   - onMove function exists:', typeof onMove !== 'undefined');
 };
 
-// ...existing code...
+/**
+ * Utility function to set Chessground state and assert sync
+ */
+function setChessgroundState({fen, orientation, turnColor, movable, drawable, ...rest}, context = '') {
+  // Ensure dests is a Map
+  if (movable && movable.dests && !(movable.dests instanceof Map)) {
+    movable.dests = new Map(Object.entries(movable.dests));
+  }
+  // Preserve current arrows unless explicitly clearing
+  if (!drawable || typeof drawable !== 'object' || !('shapes' in drawable)) {
+    drawable = { shapes: window.cg?.state?.drawable?.shapes || [] };
+  }
+  window.cg.set({fen, orientation, turnColor, movable, drawable, ...rest});
+  assertChessgroundStateSync(context);
+}
+
+/**
+ * Utility: Update board state and always redraw arrows as the last step
+ */
+function updateBoardAndArrows({fen, orientation, turnColor, movable, drawable, ...rest}, context = '') {
+  setChessgroundState({fen, orientation, turnColor, movable, drawable, ...rest}, context);
+  showAvailableMovesArrows(appState.availableMoves || []);
+}
+
+// Utility: Assert Chessground state sync
+function assertChessgroundStateSync(context = '') {
+  if (!window.cg || !window.cg.state) return;
+  const fen = window.cg.state.fen;
+  if (!fen) return;
+  const fenTurn = fen.split(' ')[1] === 'w' ? 'white' : 'black';
+  const cgTurn = window.cg.state.turnColor;
+  const movableColor = window.cg.state.movable && window.cg.state.movable.color;
+  if (fenTurn !== cgTurn || fenTurn !== movableColor) {
+    console.error(`[ASSERT][CG STATE] MISMATCH after ${context}: FEN turn=${fenTurn}, cg.turnColor=${cgTurn}, movable.color=${movableColor}`);
+  } else {
+    console.log(`[ASSERT][CG STATE] OK after ${context}: FEN turn=${fenTurn}, cg.turnColor=${cgTurn}, movable.color=${movableColor}`);
+  }
+}
+
+// Utility: Log full Chessground state for deep debugging
+function logFullChessgroundState(context = '') {
+  if (!window.cg || !window.cg.state) {
+    console.warn('[LOG][CG STATE] Chessground not initialized');
+    return;
+  }
+  const state = window.cg.state;
+  // Log a deep copy to avoid mutation issues
+  const logObj = {
+    context,
+    fen: state.fen,
+    orientation: state.orientation,
+    turnColor: state.turnColor,
+    movable: state.movable,
+    drawable: state.drawable,
+    pieces: state.pieces,
+    config: {
+      coordinates: state.coordinates,
+      coordinatesOnSquares: state.coordinatesOnSquares,
+      animation: state.animation,
+      draggable: state.draggable,
+      highlight: state.highlight,
+      selectable: state.selectable,
+      viewOnly: state.viewOnly,
+      disableContextMenu: state.disableContextMenu,
+      // Add more config as needed
+    }
+  };
+  console.log(`[CG STATE][${context}]`, logObj);
+}
