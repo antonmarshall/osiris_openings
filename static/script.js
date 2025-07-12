@@ -20,6 +20,8 @@ let appState = {
   availableMoves: [],        // Verfügbare Züge von Backend
   isNavigating: false,        // Flag für Navigation-State
   boardOrientation: 'white', // Track user-selected orientation
+  inRepertoire: true, // <--- NEU: Modus-Flag
+  lastTreeFen: CONFIG.DEFAULT_FEN // <--- Merkt sich letzte Tree-Position
 };
 
 // ✅ CRITICAL FIX: Expose appState globally for script-cg.js access
@@ -42,6 +44,69 @@ function isValidSquare(square) {
   const rank = square[1];
   
   return file >= 'a' && file <= 'h' && rank >= '1' && rank <= '8';
+}
+
+// Hilfsfunktion: Prüfe, ob aktuelle FEN im Tree ist
+async function checkIfInRepertoire(fen) {
+  try {
+    const response = await fetch('/api/find_moves', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fen: fen,
+        player: appState.currentPlayer,
+        color: appState.currentColor
+      })
+    });
+    const data = await response.json();
+    if (data.success && data.moves && data.moves.length > 0) {
+      appState.inRepertoire = true;
+      appState.lastTreeFen = fen;
+    } else {
+      appState.inRepertoire = false;
+    }
+    return appState.inRepertoire;
+  } catch (e) {
+    appState.inRepertoire = false;
+    return false;
+  }
+}
+
+// Nach jedem Zug, Back, Analyse: Modus prüfen und UI anpassen
+async function afterPositionChange(fen) {
+  const inRep = await checkIfInRepertoire(fen);
+  const saveStatus = document.getElementById('saveStatus');
+  if (inRep) {
+    // Tree-Modus: Pfeile, Move-Liste, Save-Button anzeigen
+    if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
+    showAvailableMovesArrows(appState.availableMoves || []);
+    updateMovesList(appState.availableMoves || []);
+    if (saveStatus) saveStatus.textContent = '';
+    // Optional: Button 'Zurück zum Repertoire' ausblenden
+    const backToRepBtn = document.getElementById('backToRepertoireBtn');
+    if (backToRepBtn) backToRepBtn.style.display = 'none';
+  } else {
+    // Freier Modus: Pfeile/Moves ausblenden, Hinweis zeigen
+    if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
+    showAvailableMovesArrows([]);
+    updateMovesList([]);
+    if (saveStatus) saveStatus.textContent = '⚠️ Außerhalb des Repertoires!';
+    // Button 'Zurück zum Repertoire' einblenden
+    let backToRepBtn = document.getElementById('backToRepertoireBtn');
+    if (!backToRepBtn) {
+      backToRepBtn = document.createElement('button');
+      backToRepBtn.id = 'backToRepertoireBtn';
+      backToRepBtn.textContent = 'Zurück zum Repertoire';
+      backToRepBtn.style = 'margin-top:8px;padding:6px 16px;font-size:0.95rem;background:#eee;border-radius:6px;border:1px solid #bbb;cursor:pointer;';
+      saveStatus?.parentNode?.appendChild(backToRepBtn);
+    }
+    backToRepBtn.style.display = 'inline-block';
+    backToRepBtn.onclick = async () => {
+      renderChessBoard(appState.lastTreeFen, appState.currentColor);
+      await loadMovesForPosition(appState.lastTreeFen);
+      await afterPositionChange(appState.lastTreeFen);
+    };
+  }
 }
 
 // ====================================================================
@@ -342,24 +407,31 @@ async function handleAnalyzeClick() {
 function renderChessBoard(fen, playerColor = 'white') {
   try {
     console.log('🎨 Rendering chess board with FEN:', fen.substring(0, 30) + '...');
-      // Use the global Chessground instance from script-cg.js
+    // Use the global Chessground instance from script-cg.js
     if (typeof window.cg !== 'undefined') {
       // Use persisted orientation
       const orientation = appState.boardOrientation;
-      
-      // ✅ CRITICAL FIX: Preserve existing movable configuration when updating FEN
+      // Preserve existing movable configuration when updating FEN
       const currentMovable = window.cg.state.movable;
-      
+      // Events: aus aktuellem State oder aus globaler Config
+      let events = window.cg.state.events;
+      if (!events && window.chessgroundConfig) {
+        events = window.chessgroundConfig.events;
+      }
       // Update the Chessground board while preserving legal moves
       updateBoardAndArrows({
         fen: fen,
         orientation: orientation,
-        movable: currentMovable  // ✅ Preserve legal moves (dests) and other movable settings
+        movable: currentMovable,  // Preserve legal moves (dests) and other movable settings
+        events: events
       }, 'renderChessBoard');
-        console.log('✅ Board rendered successfully with Chessground, orientation:', orientation);
+      // Nach Redraw: Legal moves aus Backend neu setzen
+      if (typeof window.updateLegalMovesFromBackend === 'function') {
+        window.updateLegalMovesFromBackend();
+      }
+      console.log('✅ Board rendered successfully with Chessground, orientation:', orientation);
       console.log('✅ Legal moves preserved:', currentMovable?.dests?.size || 0, 'pieces');
-      
-      // ✅ DEBUG: Log legal moves after board update
+      // DEBUG: Log legal moves after board update
       if (currentMovable?.dests?.size > 0) {
         console.log('🎯 Available legal moves after board update:');
         for (const [from, tos] of currentMovable.dests) {
@@ -371,7 +443,6 @@ function renderChessBoard(fen, playerColor = 'white') {
       // Retry after short delay if Chessground not yet loaded
       setTimeout(() => renderChessBoard(fen, playerColor), 100);
     }
-    
   } catch (error) {
     console.error('❌ Error rendering chessboard:', error);
   }
@@ -507,10 +578,8 @@ async function handleMoveClick(event) {
   console.log('♟️ Move clicked:', formatMoveDisplay(move), 'Index:', moveIndex);
 
   try {
-    // Set navigation flag
     appState.isNavigating = true;
     
-    // Save current state to history
     const currentState = {
       fen: appState.currentPosition,
       moves: [...appState.availableMoves],
@@ -520,29 +589,24 @@ async function handleMoveClick(event) {
       }
     };
     appState.moveHistory.push(currentState);
-      // Calculate new position after move (PHASE 1: Simplified)
     const newFen = await calculateNewPositionSimple(appState.currentPosition, move);
     
     if (newFen) {
-      // Update board visually
-      renderChessBoard(newFen, appState.currentColor);
-      
-      // Highlight the move (from/to squares)
-      highlightPlayedMove(move);
-      
-      // Load new moves for the new position
-      await loadMovesForPosition(newFen);
-      
-      // Enable back button
+      const data = await fetch('/api/find_moves', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fen: newFen,
+          player: appState.currentPlayer,
+          color: appState.currentColor
+        })
+      }).then(r => r.json());
+      await gotoPosition(newFen, data.success ? data.moves : [], appState.currentColor);
       updateBackButton(true);
-      
-      console.log('✅ Move navigation completed');
+      logFullChessgroundState('after move');
     } else {
       console.error('❌ Could not calculate new position');
     }
-    
-    // Log full Chessground state after move
-    logFullChessgroundState('after move');
   } catch (error) {
     console.error('❌ Error in move navigation:', error);
   } finally {
@@ -658,8 +722,6 @@ async function calculateNewPosition(currentFen, move) {
  */
 async function loadMovesForPosition(fen) {
   try {
-    console.log('📡 Loading moves for new position...');
-    
     const response = await fetch('/api/find_moves', {
       method: 'POST',
       headers: {
@@ -671,30 +733,9 @@ async function loadMovesForPosition(fen) {
         color: appState.currentColor
       })
     });
-    
-    const data = await response.json();    if (data.success) {
-      // Update app state
-      appState.currentPosition = fen;
-      appState.availableMoves = data.moves || [];
-      
-      // Update UI
-      updatePositionStats(data.stats);
-      updateMovesList(data.moves || []);
-      
-      // Show arrows for available next moves
-      showAvailableMovesArrows(data.moves || []);
-      
-      // ✅ NEW: Update Chessground legal moves for click-to-move
-      if (typeof window.updateLegalMovesFromBackend === 'function') {
-        window.updateLegalMovesFromBackend();
-        showAvailableMovesArrows(appState.availableMoves || []);
-      }
-      
-      console.log('✅ Loaded', data.moves?.length || 0, 'moves for new position');
-    } else {
-      console.error('❌ Failed to load moves:', data.error);
-    }
-    
+    const data = await response.json();
+    await gotoPosition(fen, data.success ? data.moves : [], appState.currentColor);
+    console.log('✅ Loaded', data.moves?.length || 0, 'moves for new position');
   } catch (error) {
     console.error('❌ Error loading moves for position:', error);
   }
@@ -825,64 +866,19 @@ async function handleBackClick() {
     console.warn('⚠️ No move history to go back to');
     return;
   }
-  console.log('⬅️ [BACK] Initiating robust backend-driven navigation (in-place reset)...');
   try {
-    // 1. Pop previous state
     const previousState = appState.moveHistory.pop();
     const previousFen = previousState.fen;
     const player = appState.currentPlayer;
     const color = appState.currentColor;
-    console.log('⬅️ [BACK] Previous FEN:', previousFen);
-    // 2. Fetch all state for previous FEN from backend
-    const response = await fetch('/api/find_moves', {
+    const data = await fetch('/api/find_moves', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ player, color, fen: previousFen })
-    });
-    if (!response.ok) throw new Error('Backend /api/find_moves failed');
-    const data = await response.json();
-    console.log('⬅️ [BACK] Backend data received:', data);
-    // 3. In-place board/UI reset (no destroy/re-init)
-    appState.currentPosition = previousFen;
-    appState.availableMoves = data.moves || [];
-    // Build dests from backend moves
-    let dests = {};
-    if (typeof buildRepertoireDests === 'function') {
-      dests = buildRepertoireDests(data.moves || []);
-    } else {
-      (data.moves || []).forEach(move => {
-        if (move.uci && move.uci.length >= 4) {
-          const from = move.uci.substring(0, 2);
-          const to = move.uci.substring(2, 4);
-          if (!dests[from]) dests[from] = [];
-          dests[from].push(to);
-        }
-      });
-    }
-    // Convert dests to Map if not already a Map
-    const destsMap = dests instanceof Map ? dests : new Map(Object.entries(dests));
-    // Extract turn color from FEN for movable.color
-    const fenTurn = previousFen.split(' ')[1] === 'w' ? 'white' : 'black';
-    updateBoardAndArrows({
-      fen: previousFen,
-      orientation: appState.boardOrientation, // use persisted orientation
-      turnColor: fenTurn, // <-- Ensure turnColor matches FEN
-      movable: { color: fenTurn, dests: destsMap, free: false }
-    }, 'handleBackClick');
-    logFullChessgroundState('after back');
-    clearArrows();
-    clearHighlights();
-    clearCircles();
-    showAvailableMovesArrows(data.moves || []);
-    updateMovesList(data.moves || []);
-    updatePositionStats(data.stats || {});
-    if (typeof logFullBoardStateContext === 'function') {
-      logFullBoardStateContext('AFTER BACK (in-place reset)');
-    }
+    }).then(r => r.json());
+    await gotoPosition(previousFen, data.success ? data.moves : [], color);
     updateBackButton(appState.moveHistory.length > 0);
-    console.log('[BACK] In-place board/UI reset complete.');
-    // Log updated state
-    console.log('[BACK] Updated Chessground state:', window.cg.state);
+    logFullChessgroundState('after back');
   } catch (error) {
     console.error('❌ [BACK] Error during robust back navigation (in-place):', error);
   }
@@ -898,7 +894,7 @@ function formatMoveDisplay(move) {
     
     // Ensure consistent castling notation (use O-O format)
     san = san.replace(/0-0-0/g, 'O-O-O');  // Convert 0-0-0 to O-O-O
-    san = san.replace(/0-0/g, 'O-O');      // Convert 0-0 to O-O (do this after the above)
+    san = san.replace(/0-0/g, 'O-O');      // Convert O-O to 0-0 (do this after the above)
     
     return san;
   }
@@ -941,13 +937,13 @@ function flipBoard() {
     console.warn('⚠️ Cannot flip board: Chessground not available');
     return;
   }
-  
   const currentOrientation = appState.boardOrientation;
   const newOrientation = currentOrientation === 'white' ? 'black' : 'white';
   appState.boardOrientation = newOrientation;
-  
-  console.log(`🔄 Flipping board from ${currentOrientation} to ${newOrientation}`);
-  updateBoardAndArrows({ orientation: newOrientation }, 'flipBoard');
+  window.cg.set({ orientation: newOrientation });
+  if (typeof window.updateLegalMovesFromBackend === 'function') {
+    window.updateLegalMovesFromBackend();
+  }
 }
 
 /**
@@ -1143,46 +1139,40 @@ function setupEventListeners() {
    */
   async function handleDragDropMove(from, to) {
     console.log(`🖱️ CLICK-TO-MOVE: Processing move ${from} → ${to}`);
-    
     try {
-      // ARCHITECTURE: Find move in Backend-provided available moves
-    const uciMove = from + to;
-    const matchingMove = appState.availableMoves.find(move => 
+      const uciMove = from + to;
+      const matchingMove = appState.availableMoves.find(move => 
         move.uci === uciMove || 
-        (move.uci && move.uci.startsWith(uciMove)) || // Handle promotion moves
-        isEquivalentMove(from, to, move)
+        (move.uci && move.uci.startsWith(uciMove)) || isEquivalentMove(from, to, move)
       );
-      
-      if (!matchingMove) {
-        console.warn(`⚠️ Move ${from}→${to} not found in Backend moves`);
-        console.log('Available moves:', appState.availableMoves.map(m => m.uci));
-        
-        // ENHANCEMENT: Reset board to current position (reject invalid move)
-        renderChessBoard(appState.currentPosition, appState.currentColor);
-        
-        // TODO-UX: Show user feedback about invalid move
-        showMoveError(`Move ${from}→${to} is not available in current position`);
-        return;
-      }
-        console.log(`✅ CLICK-TO-MOVE: Valid move found:`, matchingMove);
-      
-      // BACKEND-FOKUSSIERT: Use existing handleMoveClick logic
-      const moveIndex = appState.availableMoves.indexOf(matchingMove);
-      const mockEvent = {
-        currentTarget: {
-          getAttribute: (attr) => attr === 'data-move-index' ? moveIndex.toString() : null
+      if (matchingMove) {
+        const moveIndex = appState.availableMoves.indexOf(matchingMove);
+        const mockEvent = {
+          currentTarget: {
+            getAttribute: (attr) => attr === 'data-move-index' ? moveIndex.toString() : null
+          }
+        };
+        await handleMoveClick(mockEvent);
+        console.log(`🖱️ CLICK-TO-MOVE: Move successfully processed via navigation system`);
+      } else {
+        // Freier Zug (nicht im Tree)
+        const Chess = window.game.constructor;
+        const tempGame = new Chess(appState.currentPosition);
+        const legalMoves = tempGame.moves({ verbose: true });
+        const found = legalMoves.find(m => m.from === from && m.to === to);
+        if (!found) {
+          showMoveError(`Move ${from}→${to} is not legal in this position.`);
+          renderChessBoard(appState.currentPosition, appState.currentColor);
+          return;
         }
-      };
-      
-      // Delegate to existing navigation system
-      await handleMoveClick(mockEvent);
-      
-      console.log(`🖱️ CLICK-TO-MOVE: Move successfully processed via navigation system`);
-        } catch (error) {
+        tempGame.move({ from, to });
+        const newFen = tempGame.fen();
+        await gotoPosition(newFen, [], appState.currentColor);
+        console.log('⚠️ Freier Zug gespielt, keine Tree-Daten mehr.');
+      }
+    } catch (error) {
       console.error('❌ Error processing click-to-move:', error);
-      
-      // ENHANCEMENT: Reset board on error
-              renderChessBoard(appState.currentPosition, appState.currentColor);
+      renderChessBoard(appState.currentPosition, appState.currentColor);
       showMoveError('Error processing move. Board reset to current position.');
     }
   }
@@ -1610,4 +1600,23 @@ function logFullChessgroundState(context = '') {
     }
   };
   console.log(`[CG STATE][${context}]`, logObj);
+}
+
+// Zentrale Funktion für Positionswechsel
+async function gotoPosition(fen, moves, color) {
+  appState.currentPosition = fen;
+  appState.availableMoves = moves || [];
+  appState.currentColor = color || appState.currentColor;
+  // Board-Update
+  renderChessBoard(fen, appState.currentColor);
+  // Chessground-movable: immer alle legalen Züge (chess.js)
+  if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
+  // Pfeile/Moves nur wenn Tree-Züge vorhanden
+  if (appState.availableMoves.length > 0) {
+    showAvailableMovesArrows(appState.availableMoves);
+    updateMovesList(appState.availableMoves);
+  } else {
+    showAvailableMovesArrows([]);
+    updateMovesList([]);
+  }
 }
