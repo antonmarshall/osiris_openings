@@ -5,12 +5,14 @@ import chess.pgn
 from typing import List, Optional, Tuple
 from pathlib import Path
 import re
+import logging
 
 def save_opening_line(player_name: str, start_fen: str, moves_san: list) -> str:
     """
     Speichert eine neue PGN-Datei für eine Opening-Linie.
     Gibt den erzeugten Dateinamen zurück.
     """
+    logger = logging.getLogger("add_opening_lines")
     # Zielverzeichnis: players/<player>/pgn
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(script_dir, 'players', player_name, 'pgn')
@@ -58,7 +60,7 @@ def save_opening_line(player_name: str, start_fen: str, moves_san: list) -> str:
     with open(file_path, 'w', encoding='utf-8') as f:
         exporter = chess.pgn.FileExporter(f)
         game.accept(exporter)
-
+    logger.info(f"[PGN WRITE] player={player_name}, moves={moves_san}, file={file_path}")
     return file_name
 
 def find_related_files(player_name: str, moves_san: List[str]) -> List[Tuple[str, List[str]]]:

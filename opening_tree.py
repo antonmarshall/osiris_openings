@@ -16,9 +16,9 @@ class Node:
     """
     Knoten im Eröffnungsbaum, der eine Schachstellung und Statistiken repräsentiert.
     """
-    __slots__ = ("id", "fen", "games", "wins", "draws", "losses", "children", "games_info", "move_counts", "elo_diff_sum", "elo_diff_count", "move_dates", "move_san", "parent_fen", "parent_id", "source_files", "is_in_repertoire", "is_temporary")
+    __slots__ = ("id", "fen", "games", "wins", "draws", "losses", "children", "games_info", "move_counts", "elo_diff_sum", "elo_diff_count", "move_dates", "move_san", "parent_fen", "parent_id", "source_files", "is_in_repertoire")
     
-    def __init__(self, fen: str, move_san: Optional[str] = None, parent_fen: Optional[str] = None, parent_id: Optional[str] = None, is_in_repertoire: bool = True, is_temporary: bool = False):
+    def __init__(self, fen: str, move_san: Optional[str] = None, parent_fen: Optional[str] = None, parent_id: Optional[str] = None, is_in_repertoire: bool = True):
         self.id = str(uuid.uuid4())
         self.fen = fen
         self.move_san = move_san
@@ -36,7 +36,6 @@ class Node:
         self.move_dates: Dict[str, List[str]] = {}
         self.source_files: Set[str] = set()
         self.is_in_repertoire = is_in_repertoire
-        self.is_temporary = is_temporary
 
     def add_child(self, move_uci: str, child_node: 'Node'):
         self.children[move_uci] = child_node
@@ -100,8 +99,6 @@ class Node:
             return "#f44336"    # Red for poor (below 35%)
     
     def to_dict(self, perspective_color_str: str, include_children: bool = True, max_depth: int = 20, current_depth: int = 0, is_repertoire: bool = False) -> Dict[str, Any]:
-        # perspective_color_str helps interpret 'wins', 'draws', 'losses' if they were stored
-        # from a neutral point of view. Here, they are stored from self.player_name's view.
         win_rate = self.get_win_rate()
         color = self.get_move_color(is_repertoire)
         result = {
@@ -117,9 +114,8 @@ class Node:
             'win_rate': round(win_rate, 2),
             'color': color,
             'game_info': self.games_info[:10], # Limit game_info for brevity
-            'is_temporary': self.is_temporary,
         }
-          # Only include children if requested, within depth limit, and we have children
+        # Only include children if requested, within depth limit, and we have children
         if include_children and current_depth < max_depth and self.children:
             result['children'] = {uci: child.to_dict(
                 perspective_color_str, 
@@ -127,10 +123,9 @@ class Node:
                 max_depth, 
                 current_depth + 1, 
                 is_repertoire
-            ) for uci, child in self.children.items() if not getattr(child, 'is_temporary', False)}
+            ) for uci, child in self.children.items() if child.games > 0}
         else:
             result['children'] = {}
-        
         return result
 
 class OpeningTree:
@@ -155,6 +150,17 @@ class OpeningTree:
         self.tree_dict: Dict[str, Dict[str, Any]] = {}
         
         logger.info(f"OpeningTree initialized for player: {self.player_name}, perspective: {self.current_perspective_color}. Root FEN: {self.root_fen}")
+        # --- NEW: Log all children of root node after init ---
+        self.log_root_children("__init__ after tree creation")
+
+    def log_root_children(self, context=""):
+        root = self.nodes_by_fen.get(self._get_node_key(self.root_fen))
+        if root:
+            logger.info(f"[DEBUG] Root children after {context}:")
+            for uci, child in root.children.items():
+                logger.info(f"    move_san={child.move_san}, uci={uci}, games={child.games}")
+        else:
+            logger.info(f"[DEBUG] No root node found after {context}")
 
     def _get_node_key(self, fen: str) -> str:
         """
@@ -335,6 +341,7 @@ class OpeningTree:
                 child_node_obj = Node(full_fen_after_move, move_san=move_san, parent_fen=parent_node_in_tree.fen, parent_id=parent_node_in_tree.id, is_in_repertoire=is_in_repertoire)
                 self.nodes[child_node_obj.id] = child_node_obj
                 self.nodes_by_fen[node_key] = child_node_obj
+                logger.info(f"[NODE CREATE] move={move_san} parent={parent_node_in_tree.id[:8]} id={child_node_obj.id[:8]} games={child_node_obj.games} context=add_game_to_tree")
             
             parent_node_in_tree.add_child(move_uci, child_node_obj)
             child_node_obj.increment_game_stats(result_for_player, game_details, skip_stats, self.own_repertoir)
@@ -354,6 +361,8 @@ class OpeningTree:
         
         # Mark PGN file as processed for this tree instance if needed
         self.processed_files.add(pgn_file_path)
+        # At the end of PGN loading, log root children
+        self.log_root_children(f"add_game_to_tree from {pgn_file_path}")
 
     def get_tree_data(self, fen: str, perspective_color_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
@@ -379,6 +388,7 @@ class OpeningTree:
     def get_moves_from_position(self, fen: str, perspective_color_str: Optional[str] = None) -> Dict[str, Any]:
         """
         Returns data for the given FEN and all direct child moves.
+        Uses the same filtering logic as to_dict() for consistency.
         """
         node_key = self._get_node_key(fen)
         current_node_obj = self.nodes_by_fen.get(node_key)
@@ -392,17 +402,21 @@ class OpeningTree:
         logger.info(f"🔍 TREE CONTEXT: player={self.player_name} | perspective={display_perspective} | "
                    f"own_repertoir={self.own_repertoir} | children_count={len(current_node_obj.children)}")
 
-        node_data = current_node_obj.to_dict(display_perspective, include_children=False, max_depth=1) # Stats of the current FEN
-
-        moves_data = []
-        board_at_fen = chess.Board(current_node_obj.fen) # Use the node's full FEN
+        # Get node data using the same logic as to_dict()
+        node_data = current_node_obj.to_dict(display_perspective, include_children=False, max_depth=1)
         
-        # Pre-calculate game counts for thickness calculation
-        game_counts = [child_node_obj.games for child_node_obj in current_node_obj.children.values()]
+        # Get filtered children using the same logic as to_dict()
+        filtered_children = {uci: child for uci, child in current_node_obj.children.items() if child.games > 0}
+        
+        moves_data = []
+        board_at_fen = chess.Board(current_node_obj.fen)
+        
+        # Pre-calculate game counts for thickness calculation (only from filtered children)
+        game_counts = [child_node_obj.games for child_node_obj in filtered_children.values()]
         max_games = max(game_counts) if game_counts else 1
         min_games = min(game_counts) if game_counts else 0
 
-        for move_uci, child_node_obj in current_node_obj.children.items():
+        for move_uci, child_node_obj in filtered_children.items():
             try:
                 move = board_at_fen.parse_uci(move_uci)
                 move_san = board_at_fen.san(move)
@@ -472,7 +486,7 @@ class OpeningTree:
 
         # Calculate total years for sparkline rendering
         all_years = set()
-        for child_node_obj in current_node_obj.children.values():
+        for child_node_obj in filtered_children.values():
             for move_uci, dates in current_node_obj.move_dates.items():
                 for date_str in dates:
                     try:
@@ -484,7 +498,8 @@ class OpeningTree:
         
         years_list = sorted(list(all_years)) if all_years else []
 
-        return {            "fen": fen,
+        return {
+            "fen": fen,
             "node_stats": node_data, 
             "moves": moves_data,
             "years": years_list,
@@ -576,24 +591,16 @@ class OpeningTree:
             logger.error(f"[get_or_create_child_by_id_and_move] Invalid move SAN '{move_san}' for node {node_id}: {e}")
             logger.error(traceback.format_exc())
             raise ValueError(f"Invalid move SAN '{move_san}' for node {node_id}: {e}")
-        # 3. Log all children types
-        for k, v in current_node.children.items():
-            logger.debug(f"[get_or_create_child_by_id_and_move] Child key: {k}, type: {type(v)}, value: {v}")
         # 4. Look for the child node in current_node.children (by UCI)
         child_node = current_node.children.get(move_uci)
         if child_node:
-            if isinstance(child_node, dict):
-                logger.error(f"[get_or_create_child_by_id_and_move] Non-Node object found in children: {type(child_node)}. Key: {move_uci}, Node ID: {node_id}, Value: {child_node}")
-                logger.error(traceback.format_exc())
-                raise TypeError(f"Child node for move {move_uci} is not a Node object (got {type(child_node)}). Data: {child_node}")
-            logger.info(f"[get_or_create_child_by_id_and_move] Returning existing child node for move {move_uci}, Node ID: {child_node.id}")
             return child_node.to_dict(self.current_perspective_color, include_children=True)
         # 5. If not, create the child node, add it to the tree, and return its to_dict(...)
         board.push(move)  # <-- Apply the move before getting the FEN!
         new_fen = board.fen()
-        child_node = Node(new_fen, move_san=move_san, parent_fen=current_node.fen, parent_id=current_node.id, is_in_repertoire=self.own_repertoir, is_temporary=True)
+        child_node = Node(new_fen, move_san=move_san, parent_fen=current_node.fen, parent_id=current_node.id, is_in_repertoire=self.own_repertoir)
+        logger.info(f"[NODE CREATE] move={move_san} parent={current_node.id[:8]} id={child_node.id[:8]} games={child_node.games} context=get_or_create_child_by_id_and_move")
         current_node.add_child(move_uci, child_node)
         self.nodes[child_node.id] = child_node
         self.nodes_by_fen[self._get_node_key(new_fen)] = child_node
-        logger.info(f"[get_or_create_child_by_id_and_move] Created new child node for move {move_uci}, Node ID: {child_node.id}")
         return child_node.to_dict(self.current_perspective_color, include_children=True)

@@ -553,6 +553,8 @@ async def process_games(player: str, color: str = 'white'):
             # Load games using centralized function
             load_stats = _load_pgns_for_player(actual_player, player_dir, opening_tree, detailed_logging=True)
             log_summary(f"{load_stats['games_loaded']} Partien verarbeitet und in OpeningTree geladen.")
+            # Tree nach dem Laden ausgeben
+            opening_tree.print_tree(max_depth=4, max_children=8)
         pgn_texts = []
         for file in os.listdir(player_dir):
             if file.endswith('.pgn'):
@@ -830,7 +832,7 @@ async def api_find_moves(data: dict = Body(...)):
         return {"success": False, "moves": [], "stats": {"played": 0, "win_rate": 0.0}, "total_moves_per_year": None, "error": f"OpeningTree not loaded for this player '{backend_player}'. Please load games first."}
     result = opening_tree.get_moves_from_position(fen, color)
     # --- LOG: Children für die angefragte FEN ausgeben ---
-    node = opening_tree.nodes.get(fen)
+    node = opening_tree.nodes_by_fen.get(opening_tree._get_node_key(fen))
     if node and node.children:
         log_lines = [
             f"    ├─ {child.move_san or uci:<6} | Games: {child.games:<3} | Win%: {child.get_win_rate():5.1f}"
@@ -843,11 +845,12 @@ async def api_find_moves(data: dict = Body(...)):
         logger.info(f"[Tree/API] FEN {fen[:30]}... nicht im Tree gefunden.")
     if result is None or not isinstance(result, dict):
         logger.info(f"[api_find_moves] 📭 Keine Daten für FEN: {fen[:50]}... (Position möglicherweise noch nicht analysiert)")
-        return {"success": True, "moves": [], "stats": {"played": 0, "win_rate": 0.0}, "total_moves_per_year": None}
+        return {"success": True, "moves": [], "stats": {"played": 0, "win_rate": 0.0}, "total_moves_per_year": None, "node_id": None}
     moves = result.get("moves", [])
     games = result.get("node_stats", {}).get("games", 0)
     win_rate = result.get("node_stats", {}).get("win_rate", 0.0)
     total_moves_per_year = result.get("total_moves_per_year", None)
+    node_id = result.get("node_stats", {}).get("id", None)
     log_summary(f"{len(moves)} Züge für FEN {fen[:30]}... | Spiele: {games} | Winrate: {win_rate:.1f}%")
     
     return {
@@ -857,7 +860,8 @@ async def api_find_moves(data: dict = Body(...)):
             "played": games,
             "win_rate": win_rate
         },
-        "total_moves_per_year": total_moves_per_year
+        "total_moves_per_year": total_moves_per_year,
+        "node_id": node_id
     }
 
 @app.post("/api/add_opening_line")
@@ -867,6 +871,7 @@ async def api_add_opening_line(
     moves_san: List[str] = Body(..., alias="moves_san"),
     perspective_color: str = Body(default="white", alias="color") # Made optional with default
 ):
+    logger.info(f"[API CALL] /api/add_opening_line: player={frontend_player_name}, fen={start_fen}, moves={moves_san}, color={perspective_color}")
     global opening_tree, current_player
     try:
         # Resolve frontend player to actual backend player
@@ -1072,6 +1077,7 @@ async def api_add_single_move(
     move_san: str = Body(..., alias="move_san"),        # Der neue Zug (z.B. "e5")
     perspective_color: str = Body(default="white", alias="color")
 ):
+    logger.info(f"[API CALL] /api/add_single_move: player={frontend_player_name}, fen={current_fen}, move={move_san}, color={perspective_color}")
     """
     Fügt einen einzelnen Zug zur Repertoire-Linie hinzu.
     Bekommt die aktuelle Position und einen Zug, berechnet selbst die neue Position.
@@ -1340,6 +1346,46 @@ async def debug_file_management(
     except Exception as e:
         return {"error": f"Debug failed: {str(e)}", "player": player, "test_moves": test_moves}
 
+@app.post("/api/get_child_node")
+async def get_child_node(request: Request):
+    import logging
+    import json
+    import traceback
+    logger = logging.getLogger("api")
+    try:
+        data = await request.json()
+        node_id = data.get("node_id")
+        move_san = data.get("move_san")
+        if not node_id or not move_san:
+            response = {"success": False, "error": "node_id and move_san required"}
+            logger.error(f"[get_child_node] {response}")
+            return JSONResponse(response, status_code=400)
+        child_node_dict = opening_tree.get_or_create_child_by_id_and_move(node_id, move_san)
+        response = {"success": True, "child": child_node_dict}
+        logger.info(f"[get_child_node] Returning: {json.dumps(response)[:500]}...")
+        return JSONResponse(response)
+    except Exception as e:
+        tb = traceback.format_exc()
+        response = {"success": False, "error": str(e), "traceback": tb}
+        logger.error(f"[get_child_node] Exception: {response}")
+        return JSONResponse(response, status_code=400)
+
+@app.post("/api/get_children")
+async def get_children(request: Request):
+    data = await request.json()
+    node_id = data.get("node_id")
+    if not node_id:
+        return JSONResponse({"success": False, "error": "node_id required"}, status_code=400)
+    node = opening_tree.nodes.get(node_id)
+    if not node:
+        return JSONResponse({"success": False, "error": "Node not found"}, status_code=404)
+    # Nur Kinder mit is_in_repertoire=True zurückgeben
+    children = [child.to_dict(include_children=False) for child in node.children.values() if child.is_in_repertoire]
+    return JSONResponse({
+        "success": True,
+        "children": children
+    })
+
 def safe_int(value, default=0):
     """Sichere Konvertierung zu Integer mit Default-Wert für leere Strings oder None"""
     try:
@@ -1466,3 +1512,31 @@ def _load_pgns_for_player(player: str, player_dir: str, opening_tree: OpeningTre
         'files_processed': len(pgn_files),
         'load_time': load_time
     }
+
+@app.post("/api/get_node_by_id")
+async def get_node_by_id(request: Request):
+    import logging
+    import json
+    import traceback
+    logger = logging.getLogger("api")
+    try:
+        data = await request.json()
+        node_id = data.get("node_id")
+        if not node_id:
+            response = {"success": False, "error": "node_id required"}
+            logger.error(f"[get_node_by_id] {response}")
+            return JSONResponse(response, status_code=400)
+        node = opening_tree.nodes.get(node_id)
+        if not node:
+            response = {"success": False, "error": f"Node with id {node_id} not found"}
+            logger.error(f"[get_node_by_id] {response}")
+            return JSONResponse(response, status_code=404)
+        node_dict = node.to_dict(opening_tree.current_perspective_color, include_children=True)
+        response = {"success": True, "node": node_dict}
+        logger.info(f"[get_node_by_id] Returning: {json.dumps(response)[:500]}...")
+        return JSONResponse(response)
+    except Exception as e:
+        tb = traceback.format_exc()
+        response = {"success": False, "error": str(e), "traceback": tb}
+        logger.error(f"[get_node_by_id] Exception: {response}")
+        return JSONResponse(response, status_code=400)

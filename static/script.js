@@ -21,18 +21,9 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log(`[onSelect] called for square: ${square}`);
     console.log(`🎯 PIECE SELECTED: ${square}`);
     console.log(`🔍 Current arrows on board:`, window.cg?.state?.drawable?.shapes?.length || 0);
-    const isOwnRepertoire = appState.currentPlayer === 'white_repertoir' || appState.currentPlayer === 'black_repertoir';
     let selectable = false;
-    if (isOwnRepertoire) {
-      // Im Repertoire-Modus: alle legalen Züge laut chess.js
-      const Chess = window.game.constructor;
-      const chess = new Chess(appState.currentPosition);
-      const legalMoves = chess.moves({ verbose: true });
-      const availableFromSquares = new Set(legalMoves.map(m => m.from));
-      selectable = availableFromSquares.has(square);
-      console.log(`[REPERTOIRE MODUS] selectable from squares:`, Array.from(availableFromSquares));
-    } else if (typeof window.appState !== 'undefined' && window.appState.availableMoves) {
-      // Im Tree-Modus: nur Tree-Moves
+    // Always use backend-provided moves (already filtered for games > 0)
+    if (typeof window.appState !== 'undefined' && window.appState.availableMoves) {
       const availableFromSquares = new Set();
       window.appState.availableMoves.forEach(move => {
         if (move.uci && move.uci.length >= 4) {
@@ -40,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
       selectable = availableFromSquares.has(square);
-      console.log(`[TREE MODUS] selectable from squares:`, Array.from(availableFromSquares));
+      console.log(`[BACKEND MODUS] selectable from squares:`, Array.from(availableFromSquares));
     }
     if (selectable) {
       console.log(`✅ Piece at ${square} has legal moves`);
@@ -515,6 +506,7 @@ async function handleAnalyzeClick() {
     
     const data = await response.json();
     console.log('📊 Analysis result:', data);
+    console.log('🔍 Complete moves data from backend:', data.moves);
       if (data.success) {
       console.log('✅ Analysis successful!');
       console.log('🎯 Position:', data.position);
@@ -886,6 +878,7 @@ async function loadMovesForPosition(fen) {
       })
     });
     const data = await response.json();
+    console.log('🔍 Complete moves data from loadMovesForPosition:', data.moves);
     appState.currentNodeId = data.node_id || null; // Update node id
     await gotoPosition(fen, data.success ? data.moves : [], appState.currentColor);
     updateMovesList(appState.availableMoves); // <--- always update move list
@@ -943,13 +936,12 @@ function updatePositionStats(stats) {
 function updateMovesList(moves) {
   const movesList = document.getElementById('movesList');
   if (!movesList) return;
-  // Filter out temporary moves
-  const filteredMoves = moves.filter(move => !move.is_temporary);
-  if (filteredMoves.length === 0) {
+  // Backend already filters moves with games > 0, so we can use all moves from backend
+  if (moves.length === 0) {
     movesList.innerHTML = '<p style="color: #666; font-style: italic;">No more moves available from this position.</p>';
     return;
   }
-  const movesHtml = filteredMoves.map((move, index) => {
+  const movesHtml = moves.map((move, index) => {
     // BACKEND-FOKUSSIERT: Use backend-calculated color directly (no frontend calculation)
     const backendColor = move.color || '#888888'; // Backend provides optimal color
     return `
@@ -990,7 +982,7 @@ function updateMovesList(moves) {
 function updateBackButton(enabled) {
   const backBtn = document.getElementById('backBtn');
   if (!backBtn) return;
-
+  
   if (enabled) {
     backBtn.disabled = false;
     backBtn.style.background = '#6c757d';
@@ -1329,7 +1321,6 @@ function setupEventListeners() {
     const repertoireNames = ['my repertoire', 'white_repertoir', 'black_repertoir'];
     const isOwnRepertoire = repertoireNames.includes((appState.currentPlayer || '').toLowerCase());
     if (isOwnRepertoire) {
-      // In Repertoire-Modus: Erlaube jeden legalen Zug laut chess.js
       const Chess = window.game.constructor;
       const tempGame = new Chess(appState.currentPosition);
       const legalMoves = tempGame.moves({ verbose: true });
@@ -1338,6 +1329,27 @@ function setupEventListeners() {
         showMoveError(`Move ${from}→${to} is not legal in this position (Repertoire-Modus).`);
         renderChessBoard(appState.currentPosition, appState.currentColor);
         return;
+      }
+      // Check if move is already in the tree
+      const moveInTree = appState.availableMoves.some(m => m.uci === from + to);
+      if (!moveInTree) {
+        // This is a new/temporary move
+        const saveSwitch = document.getElementById('saveToRepertoireSwitch');
+        if (saveSwitch && saveSwitch.checked) {
+          // Save to repertoire immediately and create permanent node
+          await fetch('/api/add_single_move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              player_name: appState.currentPlayer,
+              current_fen: appState.currentPosition,
+              move_san: found.san,
+              color: appState.currentColor
+            })
+          });
+          // After saving, reload the repertoire for this position
+          await loadMovesForPosition(appState.currentPosition);
+        }
       }
       tempGame.move({ from, to });
       const newFen = tempGame.fen();
@@ -1568,7 +1580,7 @@ window.updateLegalMovesFromBackend = function() {
     for (const move of legalMoves) {
       if (!dests.has(move.from)) dests.set(move.from, []);
       dests.get(move.from).push(move.to);
-    }
+  }
     console.log('[updateLegalMovesFromBackend] [REPERTOIRE MODUS] All legal moves:', dests);
   } else {
     for (const move of appState.availableMoves || []) {
@@ -1626,7 +1638,7 @@ function ensureChessgroundReady() {
     if (!boardElem) {
       console.error('[ensureChessgroundReady] Board element not found!');
       return;
-    }
+  }
     // Remove any old board content
     boardElem.innerHTML = '';
     // Re-initialize Chessground
