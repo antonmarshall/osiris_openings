@@ -26,8 +26,8 @@
 <body>
   <div class="container">
     <h1>horus openings</h1>
-    <!-- Menü-Bereich: Spielerwahl & Neuer Spieler (zentriert, modern) -->    <div class="section player-menu" style="max-width: 800px; margin: 0 auto 30px auto; padding: 0 20px;">
-      <div class="player-controls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
+    <!-- Menü-Bereich: Spielerwahl & Neuer Spieler (zentriert, modern) -->    <div class="section player-menu" style="max-width: 1200px; margin: 0 auto 30px auto; padding: 0 20px;">
+      <div class="player-controls" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; align-items: start;">
         <!-- Vorhandene Spieler -->        <div class="existing-players" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef;">
           <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Vorhandene Spieler</h3>
           
@@ -117,6 +117,51 @@
           </button>
           
           <div id="downloadStatus" style="margin-top: 12px; min-height: 22px; color: #e74c3c; font-size: 0.9rem; text-align: center;"></div>
+        </div>
+        
+        <!-- Eigenes Repertoire -->
+        <div class="own-repertoire" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef;">
+          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Eigenes Repertoire</h3>
+          
+          <div class="color-filter" style="margin-bottom: 24px; text-align: center;">
+            <label style="margin-right: 20px; font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
+              <input type="radio" name="repertoireColorSelect" value="white" checked style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Weiß
+            </label>
+            <label style="font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
+              <input type="radio" name="repertoireColorSelect" value="black" style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Schwarz
+            </label>
+          </div>
+          
+          <button id="viewRepertoireBtn" style="
+            padding: 16px 20px; 
+            border-radius: 8px; 
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); 
+            color: #fff; 
+            font-weight: 600; 
+            font-size: 1.1rem; 
+            border: none; 
+            cursor: pointer; 
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.2); 
+            width: 100%;
+            margin-bottom: 12px;
+          ">
+            📋 Repertoire ansehen/bearbeiten
+          </button>
+          
+          <button id="trainRepertoireBtn" style="
+            padding: 16px 20px; 
+            border-radius: 8px; 
+            background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); 
+            color: #fff; 
+            font-weight: 600; 
+            font-size: 1.1rem; 
+            border: none; 
+            cursor: pointer; 
+            box-shadow: 0 4px 12px rgba(230, 126, 34, 0.2); 
+            width: 100%;
+          ">
+            🎯 Repertoire trainieren
+          </button>
         </div>
       </div>
     </div>

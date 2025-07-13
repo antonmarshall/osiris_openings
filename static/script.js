@@ -526,6 +526,102 @@ async function handleAnalyzeClick() {
 }
 
 // ====================================================================
+// 3.1. REPERTOIRE BUTTON HANDLERS
+// ====================================================================
+
+/**
+ * Handle "Repertoire ansehen/bearbeiten" button click
+ * Sets player to "My Repertoire" and starts analysis
+ */
+async function handleViewRepertoireClick() {
+  try {
+    console.log('📋 View Repertoire button clicked');
+    
+    // Get selected color from repertoire container
+    const colorRadios = document.getElementsByName('repertoireColorSelect');
+    let selectedColor = 'white'; // default
+    for (const radio of colorRadios) {
+      if (radio.checked) {
+        selectedColor = radio.value;
+        break;
+      }
+    }
+    
+    console.log('👤 Player: My Repertoire');
+    console.log('⚫⚪ Color:', selectedColor);
+    
+    // Set the player dropdown to "My Repertoire"
+    const playerSelect = document.getElementById('playerSelect');
+    if (playerSelect) {
+      // Find and select "My Repertoire" option
+      for (let i = 0; i < playerSelect.options.length; i++) {
+        if (playerSelect.options[i].text.toLowerCase().includes('my repertoire')) {
+          playerSelect.selectedIndex = i;
+          break;
+        }
+      }
+    }
+    
+    // Set the color radio buttons in the left container
+    const leftColorRadios = document.getElementsByName('colorSelect');
+    for (const radio of leftColorRadios) {
+      radio.checked = radio.value === selectedColor;
+    }
+    
+    // Start analysis (same as handleAnalyzeClick)
+    console.log('📡 Calling API for My Repertoire...');
+    const response = await fetch(`/api/process_games/My Repertoire?color=${selectedColor}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const data = await response.json();
+    console.log('📊 Analysis result:', data);
+    
+    if (data.success) {
+      console.log('✅ Repertoire analysis successful!');
+      displayAnalysisResults(data, 'My Repertoire', selectedColor);
+    } else {
+      console.error('❌ Repertoire analysis failed');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error during repertoire analysis:', error);
+  }
+}
+
+/**
+ * Handle "Repertoire trainieren" button click
+ * TODO: Implement training mode
+ */
+async function handleTrainRepertoireClick() {
+  try {
+    console.log('🎯 Train Repertoire button clicked');
+    
+    // Get selected color from repertoire container
+    const colorRadios = document.getElementsByName('repertoireColorSelect');
+    let selectedColor = 'white'; // default
+    for (const radio of colorRadios) {
+      if (radio.checked) {
+        selectedColor = radio.value;
+        break;
+      }
+    }
+    
+    console.log('🎯 Starting training mode for My Repertoire');
+    console.log('⚫⚪ Color:', selectedColor);
+    
+    // TODO: Implement training mode logic
+    alert('🎯 Trainingsmodus wird bald implementiert!');
+    
+  } catch (error) {
+    console.error('❌ Error starting training mode:', error);
+  }
+}
+
+// ====================================================================
 // 4. CHESS BOARD RENDERING
 // ====================================================================
 
@@ -1304,6 +1400,20 @@ function setupEventListeners() {
             event.target.closest('.toggle-switch').classList.toggle('active', isChecked);
         });
     }
+  // --- END NEW ---
+
+  // --- NEW: Add listeners for repertoire buttons ---
+  const viewRepertoireBtn = document.getElementById('viewRepertoireBtn');
+  if (viewRepertoireBtn) {
+    viewRepertoireBtn.addEventListener('click', handleViewRepertoireClick);
+    console.log('📋 View Repertoire button handler attached');
+  }
+
+  const trainRepertoireBtn = document.getElementById('trainRepertoireBtn');
+  if (trainRepertoireBtn) {
+    trainRepertoireBtn.addEventListener('click', handleTrainRepertoireClick);
+    console.log('🎯 Train Repertoire button handler attached');
+  }
   // --- END NEW ---
 
   // ====================================================================
