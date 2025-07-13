@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Event-Handler ---
   function onSelect(square) {
+    console.log(`[onSelect] called for square: ${square}`);
     console.log(`🎯 PIECE SELECTED: ${square}`);
     console.log(`🔍 Current arrows on board:`, window.cg?.state?.drawable?.shapes?.length || 0);
     const isOwnRepertoire = appState.currentPlayer === 'white_repertoir' || appState.currentPlayer === 'black_repertoir';
@@ -50,8 +51,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof window.showAvailableMovesArrows === 'function') {
       window.showAvailableMovesArrows(window.appState.availableMoves || []);
     }
+    // Always re-apply system arrows after selection
+    if (window.appState && window.appState.currentArrows) {
+      console.log('[onSelect] Reapplying system arrows');
+      window.showAvailableMovesArrows(window.appState.currentArrows);
+    }
   }
   function onMove(from, to) {
+    console.log(`[onMove] called for move: ${from} → ${to}`);
     console.log(`🖱️ CLICK-TO-MOVE: User moved ${from} → ${to}`);
     if (typeof window.handleDragDropMove === 'function') {
       window.handleDragDropMove(from, to);
@@ -67,6 +74,11 @@ document.addEventListener('DOMContentLoaded', () => {
       cg.set({ fen: game.fen(), lastMove: [from, to], drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
       console.log('[DEBUG] cg.set called (move validated fallback):', { fen: game.fen(), lastMove: [from, to], drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
       console.log('✅ Move validated by Chess.js (fallback mode)');
+    }
+    // Always re-apply system arrows after move
+    if (window.appState && window.appState.currentArrows) {
+      console.log('[onMove] Reapplying system arrows');
+      window.showAvailableMovesArrows(window.appState.currentArrows);
     }
   }
   function onDraw(shape) { annotationStore.set(shape.id, shape); }
@@ -140,7 +152,9 @@ let appState = {
   boardOrientation: 'white', // Track user-selected orientation
   inRepertoire: true, // <--- NEU: Modus-Flag
   lastTreeFen: CONFIG.DEFAULT_FEN, // <--- Merkt sich letzte Tree-Position
-  currentNodeId: null // <--- NEU: Aktuelle Node-ID
+  currentNodeId: null, // <--- NEU: Aktuelle Node-ID
+  currentNodeParentId: null, // <--- NEU: Parent Node-ID für Back-Navigation
+  currentArrows: [] // <--- Store current system arrows
 };
 
 // ✅ CRITICAL FIX: Expose appState globally for script-cg.js access
@@ -538,7 +552,7 @@ async function handleAnalyzeClick() {
  */
 function renderChessBoard(fen, playerColor = 'white') {
   try {
-    console.log('🎨 Rendering chess board with FEN:', fen.substring(0, 30) + '...');
+    console.log('[renderChessBoard] Rendering FEN:', fen, '| color:', playerColor);
       // Use the global Chessground instance from script-cg.js
     if (typeof window.cg !== 'undefined') {
       // Use persisted orientation
@@ -559,8 +573,8 @@ function renderChessBoard(fen, playerColor = 'white') {
       }, 'renderChessBoard');
       // Nur noch updateLegalMovesFromBackend setzt legale Züge!
       if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
-        console.log('✅ Board rendered successfully with Chessground, orientation:', orientation);
-      console.log('✅ Legal moves preserved:', currentMovable?.dests?.size || 0, 'pieces');
+        console.log('[renderChessBoard] Board rendered, orientation:', orientation);
+      console.log('[renderChessBoard] Legal moves preserved:', currentMovable?.dests?.size || 0, 'pieces');
       // DEBUG: Log legal moves after board update
       if (currentMovable?.dests?.size > 0) {
         console.log('🎯 Available legal moves after board update:');
@@ -569,12 +583,12 @@ function renderChessBoard(fen, playerColor = 'white') {
         }
       }
     } else {
-      console.error('❌ Chessground instance not available - waiting for script-cg.js');
+      console.error('[renderChessBoard] Chessground instance not available - waiting for script-cg.js');
       // Retry after short delay if Chessground not yet loaded
       setTimeout(() => renderChessBoard(fen, playerColor), 100);
     }
   } catch (error) {
-    console.error('❌ Error rendering chessboard:', error);
+    console.error('[renderChessBoard] Error:', error);
   }
 }
 
@@ -738,35 +752,10 @@ async function handleMoveClick(event) {
   console.log('♟️ Move clicked:', formatMoveDisplay(move), 'Index:', moveIndex);
   try {
     appState.isNavigating = true;
-    // Save current state for back navigation
-    const currentState = {
-      fen: appState.currentPosition,
-      moves: [...appState.availableMoves],
-      stats: {
-        games: document.getElementById('statsContent')?.textContent || '',
-        position: appState.currentPosition
-      },
-      nodeId: appState.currentNodeId
-    };
-    appState.moveHistory.push(currentState);
     // Use node id and move SAN for backend navigation
     const childNode = await sendMoveToBackend(move.san);
     if (childNode) {
-      appState.currentPosition = childNode.fen;
-      appState.availableMoves = childNode.children
-        ? Object.entries(childNode.children).map(([uci, child]) => ({
-            uci: uci,
-            san: child.move_san,
-            color: child.color,
-            games: child.games,
-            win_rate: child.win_rate
-          }))
-        : [];
-      updateMovesList(appState.availableMoves); // <--- always update move list
-      renderChessBoard(childNode.fen, appState.currentColor);
-      if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
-      showAvailableMovesArrows(appState.availableMoves || []);
-      updateBackButton(true);
+      updateAppStateWithNode(childNode);
     } else {
       console.error('❌ Could not get child node from backend');
     }
@@ -1002,15 +991,13 @@ function updateMovesList(moves) {
 function updateBackButton(enabled) {
   const backBtn = document.getElementById('backBtn');
   if (!backBtn) return;
-  
-  if (enabled && appState.moveHistory.length > 0) {
+
+  if (enabled) {
     backBtn.disabled = false;
     backBtn.style.background = '#6c757d';
-    backBtn.style.color = 'white';
+    backBtn.style.color = '#fff';
     backBtn.style.cursor = 'pointer';
     backBtn.title = 'Go back to previous position';
-    
-    // Add click listener if not already added
     if (!backBtn.hasAttribute('data-listener-added')) {
       backBtn.addEventListener('click', handleBackClick);
       backBtn.setAttribute('data-listener-added', 'true');
@@ -1025,31 +1012,62 @@ function updateBackButton(enabled) {
 }
 
 /**
- * Handle back button click (Schritt 3.4)
+ * Centralized function to update appState and UI from a backend node object
+ */
+function updateAppStateWithNode(node) {
+  ensureChessgroundReady();
+  if (!node) return;
+  console.log('[updateAppStateWithNode] Called with node:', node.id, '| parent_id:', node.parent_id, '| moves:', node.children ? Object.keys(node.children).length : 0);
+  appState.currentNodeId = node.id;
+  appState.currentPosition = node.fen;
+  appState.availableMoves = node.children
+    ? Object.entries(node.children).map(([uci, child]) => ({
+        uci: uci,
+        san: child.move_san,
+        color: child.color,
+        games: child.games,
+        win_rate: child.win_rate
+      }))
+    : [];
+  appState.currentNodeParentId = node.parent_id || null;
+  if (node.games !== undefined) appState.games = node.games;
+  if (node.win_rate !== undefined) appState.win_rate = node.win_rate;
+  appState.currentArrows = appState.availableMoves; // <--- Persist arrows
+  renderChessBoard(node.fen, appState.currentColor);
+  updateMovesList(appState.availableMoves);
+  showAvailableMovesArrows(appState.currentArrows); // <--- Use persisted arrows
+  if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
+  updateBackButton(!!node.parent_id);
+}
+
+/**
+ * Refactor back button logic to use node id and /api/get_node_by_id
  */
 async function handleBackClick() {
-  if (appState.moveHistory.length === 0) {
-    console.warn('⚠️ No move history to go back to');
+  if (!appState.currentNodeId) {
+    console.warn('⚠️ No current node id for back navigation');
+    return;
+  }
+  const parentId = appState.currentNodeParentId;
+  if (!parentId) {
+    console.warn('⚠️ At root node, cannot go back');
+    updateBackButton(false);
     return;
   }
   try {
-    const previousState = appState.moveHistory.pop();
-    const previousFen = previousState.fen;
-    const player = appState.currentPlayer;
-    const color = appState.currentColor;
-    const response = await fetch('/api/find_moves', {
+    const response = await fetch('/api/get_node_by_id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ player, color, fen: previousFen })
+      body: JSON.stringify({ node_id: parentId })
     });
     const data = await response.json();
-    appState.currentNodeId = data.node_id || null;
-    await gotoPosition(previousFen, data.success ? data.moves : [], color);
-    updateMovesList(appState.availableMoves); // <--- always update move list
-    updateBackButton(appState.moveHistory.length > 0);
+    if (data.success && data.node) {
+      updateAppStateWithNode(data.node);
+    } else {
+      console.error('❌ [BACK] Error: Node not found or backend error', data);
+    }
   } catch (error) {
-    appState.currentNodeId = null;
-    console.error('❌ [BACK] Error during robust back navigation (in-place):', error);
+    console.error('❌ [BACK] Error during back navigation:', error);
   }
 }
 
@@ -1311,7 +1329,7 @@ function setupEventListeners() {
     // Prüfe Repertoire-Modus
     const isOwnRepertoire = appState.currentPlayer === 'white_repertoir' || appState.currentPlayer === 'black_repertoir';
     if (isOwnRepertoire) {
-      // Erlaube jeden legalen Zug laut chess.js
+      // In Repertoire-Modus: Erlaube jeden legalen Zug laut chess.js
       const Chess = window.game.constructor;
       const tempGame = new Chess(appState.currentPosition);
       const legalMoves = tempGame.moves({ verbose: true });
@@ -1324,25 +1342,12 @@ function setupEventListeners() {
       tempGame.move({ from, to });
       const newFen = tempGame.fen();
       const moveSan = found.san;
-      console.log('✅ [REPERTOIRE MODUS] Freier Zug gespielt:', from, to, '| Neue FEN:', newFen, '| SAN:', moveSan);
-      // --- NEW: Use node_id for backend navigation ---
+      console.log('✅ [REPERTOIRE MODUS] Legal move played:', from, to, '| New FEN:', newFen, '| SAN:', moveSan);
+      // Always send the move to the backend, regardless of whether it is in the tree.
+      // The backend will return the existing child node or create a new one if needed.
       const childNode = await sendMoveToBackend(moveSan);
       if (childNode) {
-        // Update appState and board with new node info
-        appState.currentPosition = childNode.fen;
-        appState.availableMoves = childNode.children
-          ? Object.entries(childNode.children).map(([uci, child]) => ({
-              uci: uci,
-              san: child.move_san,
-              color: child.color,
-              games: child.games,
-              win_rate: child.win_rate
-            }))
-          : [];
-        updateMovesList(appState.availableMoves); // <--- always update move list
-        renderChessBoard(childNode.fen, appState.currentColor);
-        if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
-        showAvailableMovesArrows(appState.availableMoves || []);
+        updateAppStateWithNode(childNode);
       } else {
         // Fallback: just update board with new FEN
         renderChessBoard(newFen, appState.currentColor);
@@ -1418,7 +1423,8 @@ function setupEventListeners() {
  * BUG-FIX: Batch arrow addition to prevent timing conflicts
  */
 function showAvailableMovesArrows(moves) {
-  // Clear existing system arrows first
+  console.log('[showAvailableMovesArrows] Called with', moves ? moves.length : 0, 'moves');
+  appState.currentArrows = moves || []; // <--- Persist arrows
   clearArrows();
   
   if (!moves || moves.length === 0) {
@@ -1431,7 +1437,7 @@ function showAvailableMovesArrows(moves) {
   // BUG-FIX: Wait for board to be ready before adding any arrows
   if (!isBoardReady()) {
     console.warn('⚠️ Board not ready for arrows, retrying showAvailableMovesArrows in 200ms...');
-    setTimeout(() => showAvailableMovesArrows(moves), 200);
+    setTimeout(() => showAvailableMovesArrows(appState.currentArrows), 200); // <--- Use persisted arrows
     return;
   }
   
@@ -1456,7 +1462,7 @@ function showAvailableMovesArrows(moves) {
         system: true
       });
       
-      console.log(`🏹 Arrow ${index + 1}: ${fromSquare}→${toSquare} | Backend Color: ${backendColor} | Brush: ${brushName} | Games: ${move.games} | Win%: ${move.win_rate?.toFixed(1)}%`);
+      console.log(`[showAvailableMovesArrows] Arrow ${index + 1}: ${fromSquare}→${toSquare} | Color: ${backendColor} | Brush: ${brushName}`);
     }
   });
   
@@ -1465,12 +1471,13 @@ function showAvailableMovesArrows(moves) {
     // User-Pfeile erhalten, System-Pfeile hinzufügen
     const userShapes = currentShapes.filter(shape => !shape.system);
     window.cg.setShapes([...userShapes, ...newArrows]);
-    console.log(`✅ All ${newArrows.length} available move arrows displayed with backend intelligence, user arrows preserved`);
+    console.log('[showAvailableMovesArrows] All arrows set');
   } catch (error) {
     console.error('❌ Error adding batch arrows:', error);
     console.error('Arrow data:', newArrows);
   }
 }
+window.showAvailableMovesArrows = showAvailableMovesArrows;
 
 // ====================================================================
 // DEBUG FUNCTIONS (for testing castling and move processing)
@@ -1548,13 +1555,12 @@ window.testChessJsCastling = function() {
 // ====================================================================
 window.updateLegalMovesFromBackend = function() {
   if (typeof window.cg === 'undefined') {
-    console.warn('⚠️ Chessground not initialized, cannot update legal moves');
+    console.warn('[updateLegalMovesFromBackend] Chessground not initialized');
     return;
   }
   const isOwnRepertoire = appState.currentPlayer === 'white_repertoir' || appState.currentPlayer === 'black_repertoir';
   let dests = new Map();
   if (isOwnRepertoire) {
-    // Allow all legal moves from chess.js
     const Chess = window.game.constructor;
     const chess = new Chess(appState.currentPosition);
     const legalMoves = chess.moves({ verbose: true });
@@ -1562,9 +1568,8 @@ window.updateLegalMovesFromBackend = function() {
       if (!dests.has(move.from)) dests.set(move.from, []);
       dests.get(move.from).push(move.to);
     }
-    console.log('[REPERTOIRE MODUS] All legal moves allowed:', dests);
+    console.log('[updateLegalMovesFromBackend] [REPERTOIRE MODUS] All legal moves:', dests);
   } else {
-    // Only allow moves from appState.availableMoves (tree mode)
     for (const move of appState.availableMoves || []) {
       if (move.uci && move.uci.length >= 4) {
         const from = move.uci.substring(0, 2);
@@ -1573,7 +1578,7 @@ window.updateLegalMovesFromBackend = function() {
         dests.get(from).push(to);
       }
     }
-    console.log('[TREE MODUS] Only tree moves allowed:', dests);
+    console.log('[updateLegalMovesFromBackend] [TREE MODUS] Only tree moves:', dests);
   }
   window.cg.set({
     movable: {
@@ -1584,6 +1589,7 @@ window.updateLegalMovesFromBackend = function() {
       showDests: true
     }
   });
+  console.log('[updateLegalMovesFromBackend] Legal moves updated');
 };
 
 // Helper: Ensure node_id is set for the current position (fetch if missing)
@@ -1608,6 +1614,29 @@ async function ensureNodeIdForCurrentPosition() {
     appState.currentNodeId = null;
     console.error('[ensureNodeIdForCurrentPosition] Failed to fetch node_id:', e);
     return null;
+  }
+}
+
+// Defensive: Ensure Chessground is ready and event handlers are attached
+function ensureChessgroundReady() {
+  if (!window.cg || !document.getElementById('board')) {
+    console.warn('[ensureChessgroundReady] Chessground missing, re-initializing...');
+    const boardElem = document.getElementById('board');
+    if (!boardElem) {
+      console.error('[ensureChessgroundReady] Board element not found!');
+      return;
+    }
+    // Remove any old board content
+    boardElem.innerHTML = '';
+    // Re-initialize Chessground
+    window.cg = Chessground(boardElem, config);
+    // Re-attach event handlers
+    window.cg.set({ events: config.events });
+    console.log('[ensureChessgroundReady] Chessground re-initialized and event handlers attached.');
+    // <--- Immediately re-apply arrows after re-initialization
+    if (appState.currentArrows && appState.currentArrows.length > 0) {
+      showAvailableMovesArrows(appState.currentArrows);
+    }
   }
 }
 
