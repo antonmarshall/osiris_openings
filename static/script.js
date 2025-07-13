@@ -762,6 +762,7 @@ async function handleMoveClick(event) {
             win_rate: child.win_rate
           }))
         : [];
+      updateMovesList(appState.availableMoves); // <--- always update move list
       renderChessBoard(childNode.fen, appState.currentColor);
       if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
       showAvailableMovesArrows(appState.availableMoves || []);
@@ -898,6 +899,7 @@ async function loadMovesForPosition(fen) {
     const data = await response.json();
     appState.currentNodeId = data.node_id || null; // Update node id
     await gotoPosition(fen, data.success ? data.moves : [], appState.currentColor);
+    updateMovesList(appState.availableMoves); // <--- always update move list
     console.log('✅ Loaded', data.moves?.length || 0, 'moves for new position');
   } catch (error) {
     appState.currentNodeId = null;
@@ -1043,6 +1045,7 @@ async function handleBackClick() {
     const data = await response.json();
     appState.currentNodeId = data.node_id || null;
     await gotoPosition(previousFen, data.success ? data.moves : [], color);
+    updateMovesList(appState.availableMoves); // <--- always update move list
     updateBackButton(appState.moveHistory.length > 0);
   } catch (error) {
     appState.currentNodeId = null;
@@ -1336,6 +1339,7 @@ function setupEventListeners() {
               win_rate: child.win_rate
             }))
           : [];
+        updateMovesList(appState.availableMoves); // <--- always update move list
         renderChessBoard(childNode.fen, appState.currentColor);
         if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
         showAvailableMovesArrows(appState.availableMoves || []);
