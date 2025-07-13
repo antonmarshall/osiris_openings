@@ -670,17 +670,19 @@ async function startTrainingMode(playerColor) {
     appState.currentNodeId = data.node_id || null;
     appState.trainingHistory = [];
     
-    // Render board without arrows
-    renderChessBoard(data.position, playerColor);
-    showAvailableMovesArrows([]); // No arrows in training mode
-    
-    // Show training mode UI
+    // Show training mode UI first (this makes the board visible)
     showTrainingModeUI();
     
-    // If opponent starts, play first move
-    if (appState.isOpponentTurn) {
-      setTimeout(() => playOpponentMove(), 1000);
-    }
+    // Wait a moment for UI to be ready, then render board
+    setTimeout(() => {
+      renderChessBoard(data.position, playerColor);
+      showAvailableMovesArrows([]); // No arrows in training mode
+      
+      // If opponent starts, play first move
+      if (appState.isOpponentTurn) {
+        setTimeout(() => playOpponentMove(), 1000);
+      }
+    }, 100);
     
     console.log('✅ Training mode started successfully');
     
@@ -714,15 +716,23 @@ async function handleTrainingMove(from, to) {
     
     const moveSan = found.san;
     
-    // Validate move against tree
-    const childNode = await sendMoveToBackend(moveSan);
+    // STEP 1: Play the move visually on the board first
+    tempGame.move({ from, to });
+    const newFen = tempGame.fen();
+    renderChessBoard(newFen, appState.currentColor);
     
-    if (childNode) {
+    // STEP 2: Check if move exists in repertoire
+    const moveExists = await checkMoveInRepertoire(moveSan);
+    
+    if (moveExists) {
       // ✅ POSITIVE FEEDBACK - Move is in repertoire
       showTrainingFeedback(`✅ Richtig! ${moveSan} ist in deinem Repertoire!`, 'success');
       
-      // Update position
-      updateAppStateWithNode(childNode);
+      // STEP 3: Update backend state
+      const childNode = await sendMoveToBackend(moveSan);
+      if (childNode) {
+        updateAppStateWithNode(childNode);
+      }
       
       // Add to training history
       appState.trainingHistory.push({
@@ -730,6 +740,9 @@ async function handleTrainingMove(from, to) {
         move: moveSan,
         correct: true
       });
+      
+      // Update training status to show the new count
+      updateTrainingStatus();
       
       // Opponent's turn
       appState.isOpponentTurn = true;
@@ -739,8 +752,10 @@ async function handleTrainingMove(from, to) {
       // ❌ NEGATIVE FEEDBACK - Move not in repertoire
       showTrainingFeedback(`❌ ${moveSan} ist nicht in deinem Repertoire!`, 'error');
       
-      // Reset board to current position
-      renderChessBoard(appState.currentPosition, appState.currentColor);
+      // STEP 3: Reset board to current position after delay
+      setTimeout(() => {
+        renderChessBoard(appState.currentPosition, appState.currentColor);
+      }, 1000); // Show the wrong move for 1 second, then reset
       
       // Add to training history
       appState.trainingHistory.push({
@@ -748,6 +763,9 @@ async function handleTrainingMove(from, to) {
         move: moveSan,
         correct: false
       });
+      
+      // Update training status to show the new count
+      updateTrainingStatus();
     }
     
   } catch (error) {
@@ -791,6 +809,7 @@ async function playOpponentMove() {
       
       // Player's turn
       appState.isOpponentTurn = false;
+      updateTrainingStatus(); // Update status display
     }
     
   } catch (error) {
@@ -804,6 +823,7 @@ async function playOpponentMove() {
  */
 function showTrainingFeedback(message, type) {
   console.log(`🎯 Training feedback [${type}]: ${message}`);
+  console.log(`🎯 Training mode active:`, appState.trainingMode);
   
   // Create or get feedback element
   let feedbackDiv = document.getElementById('trainingFeedback');
@@ -815,59 +835,102 @@ function showTrainingFeedback(message, type) {
       position: fixed;
       top: 20px;
       right: 20px;
-      padding: 12px 16px;
+      padding: 16px 20px;
       border-radius: 8px;
       font-weight: 600;
-      text-align: center;
       z-index: 1000;
       display: none;
-      min-width: 250px;
+      min-width: 280px;
+      max-width: 350px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      transition: all 0.3s ease;
     `;
     document.body.appendChild(feedbackDiv);
   }
   
-  // Set message and style
-  feedbackDiv.textContent = message;
-  feedbackDiv.className = `training-feedback ${type}`;
+  // Set icon and style based on type
+  let icon = '🎯';
+  let backgroundColor = '#f8f9fa';
+  let textColor = '#333';
+  let borderColor = '#e67e22';
   
-  // Apply color styles
   switch (type) {
     case 'success':
-      feedbackDiv.style.background = '#d4edda';
-      feedbackDiv.style.color = '#155724';
-      feedbackDiv.style.border = '1px solid #c3e6cb';
+      icon = '✅';
+      backgroundColor = '#d5f4e6';
+      textColor = '#1e8449';
+      borderColor = '#27ae60';
       break;
     case 'error':
-      feedbackDiv.style.background = '#f8d7da';
-      feedbackDiv.style.color = '#721c24';
-      feedbackDiv.style.border = '1px solid #f5c6cb';
+      icon = '❌';
+      backgroundColor = '#fadbd8';
+      textColor = '#c0392b';
+      borderColor = '#e74c3c';
       break;
     case 'info':
-      feedbackDiv.style.background = '#d1ecf1';
-      feedbackDiv.style.color = '#0c5460';
-      feedbackDiv.style.border = '1px solid #bee5eb';
+      icon = '🤖';
+      backgroundColor = '#d6eaf8';
+      textColor = '#21618c';
+      borderColor = '#3498db';
       break;
   }
   
-  // Show feedback
-  feedbackDiv.style.display = 'block';
+  // Set content with icon
+  feedbackDiv.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span style="font-size: 1.4rem;">${icon}</span>
+      <span style="flex: 1;">${message}</span>
+    </div>
+  `;
   
-  // Auto-hide for success/info (not for errors)
-  if (type === 'success' || type === 'info') {
+  // Apply styles
+  feedbackDiv.style.background = backgroundColor;
+  feedbackDiv.style.color = textColor;
+  feedbackDiv.style.border = `2px solid ${borderColor}`;
+  
+  // Show with animation
+  feedbackDiv.style.display = 'block';
+  feedbackDiv.style.transform = 'translateX(100%)';
+  setTimeout(() => {
+    feedbackDiv.style.transform = 'translateX(0)';
+  }, 10);
+  
+  // Auto-hide with animation
+  const hideDelay = type === 'info' ? 4000 : 3000;
+  setTimeout(() => {
+    feedbackDiv.style.transform = 'translateX(100%)';
     setTimeout(() => {
       feedbackDiv.style.display = 'none';
-    }, 3000);
-  }
+    }, 300);
+  }, hideDelay);
 }
 
 /**
  * Show training mode UI
  */
 function showTrainingModeUI() {
-  // Hide analysis results if visible
+  console.log('🎯 Setting up training mode UI...');
+  
+  // Show analysis results section (contains the board)
   const analysisResults = document.getElementById('analysisResults');
   if (analysisResults) {
-    analysisResults.style.display = 'none';
+    analysisResults.style.display = 'block';
+    console.log('✅ Analysis results section made visible');
+  }
+  
+  // Update position info for training mode
+  const positionInfo = document.getElementById('positionInfo');
+  if (positionInfo) {
+    positionInfo.innerHTML = `
+      <strong>🎯 Training Mode:</strong> My Repertoire (${appState.currentColor}) | 
+      <strong>Position:</strong> ${appState.currentPosition.substring(0, 30)}...
+    `;
+  }
+  
+  // Update section title
+  const resultsHeader = analysisResults?.querySelector('.results-header h3');
+  if (resultsHeader) {
+    resultsHeader.textContent = '🎯 Repertoire Training';
   }
   
   // Show training mode indicator
@@ -885,22 +948,135 @@ function showTrainingModeUI() {
       border-radius: 6px;
       font-weight: 600;
       z-index: 1000;
+      box-shadow: 0 2px 8px rgba(230, 126, 34, 0.3);
     `;
     document.body.appendChild(trainingIndicator);
   }
   
   trainingIndicator.textContent = '🎯 Trainingsmodus aktiv';
   trainingIndicator.style.display = 'block';
+  
+  // Create training feedback area
+  let feedbackDiv = document.getElementById('trainingFeedback');
+  if (!feedbackDiv) {
+    feedbackDiv = document.createElement('div');
+    feedbackDiv.id = 'trainingFeedback';
+    feedbackDiv.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #f8f9fa;
+      border: 2px solid #e67e22;
+      border-radius: 8px;
+      padding: 16px;
+      font-weight: 600;
+      z-index: 1000;
+      max-width: 300px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      display: none;
+    `;
+    document.body.appendChild(feedbackDiv);
+  }
+  
+  // Create end training button
+  let endTrainingBtn = document.getElementById('endTrainingBtn');
+  if (!endTrainingBtn) {
+    endTrainingBtn = document.createElement('button');
+    endTrainingBtn.id = 'endTrainingBtn';
+    endTrainingBtn.textContent = '🏁 Training beenden';
+    endTrainingBtn.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #e74c3c;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      z-index: 1000;
+      box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
+    `;
+    endTrainingBtn.addEventListener('click', endTrainingMode);
+    document.body.appendChild(endTrainingBtn);
+  }
+  endTrainingBtn.style.display = 'block';
+  
+  // Update moves section for training mode
+  const movesSection = document.getElementById('movesSection');
+  if (movesSection) {
+    const movesHeader = movesSection.querySelector('h4');
+    if (movesHeader) {
+      movesHeader.textContent = '🎯 Training Status';
+    }
+    
+    const movesList = document.getElementById('movesList');
+    if (movesList) {
+      movesList.innerHTML = `
+        <div style="text-align: center; padding: 20px; color: #666;">
+          <div style="font-size: 1.2rem; margin-bottom: 12px;">🎯 Trainingsmodus aktiv</div>
+          <div style="font-size: 0.9rem; margin-bottom: 8px;">Spieler: ${appState.currentColor === 'white' ? 'Weiß' : 'Schwarz'}</div>
+          <div style="font-size: 0.9rem; margin-bottom: 16px;">Status: ${appState.isOpponentTurn ? 'Gegner ist am Zug' : 'Du bist am Zug'}</div>
+          <div style="background: #e8f5e8; padding: 8px; border-radius: 4px; font-size: 0.85rem;">
+            💡 Tipp: Klicke auf die Figuren, um Züge zu machen!
+          </div>
+        </div>
+      `;
+    }
+  }
+  
+  console.log('✅ Training mode UI setup complete');
+  
+  // Update training status
+  updateTrainingStatus();
+}
+
+/**
+ * Update training status display
+ */
+function updateTrainingStatus() {
+  if (!appState.trainingMode) return;
+  
+  const movesList = document.getElementById('movesList');
+  if (movesList) {
+    const statusText = appState.isOpponentTurn ? 'Gegner ist am Zug' : 'Du bist am Zug';
+    const statusColor = appState.isOpponentTurn ? '#e67e22' : '#27ae60';
+    
+    movesList.innerHTML = `
+      <div style="text-align: center; padding: 20px; color: #666;">
+        <div style="font-size: 1.2rem; margin-bottom: 12px;">🎯 Trainingsmodus aktiv</div>
+        <div style="font-size: 0.9rem; margin-bottom: 8px;">Spieler: ${appState.currentColor === 'white' ? 'Weiß' : 'Schwarz'}</div>
+        <div style="font-size: 0.9rem; margin-bottom: 16px; color: ${statusColor}; font-weight: 600;">Status: ${statusText}</div>
+        <div style="background: #e8f5e8; padding: 8px; border-radius: 4px; font-size: 0.85rem;">
+          💡 Tipp: Klicke auf die Figuren, um Züge zu machen!
+        </div>
+        ${appState.trainingHistory.length > 0 ? `
+          <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
+            <div style="font-size: 0.9rem; margin-bottom: 8px; font-weight: 600;">Training Fortschritt:</div>
+            <div style="font-size: 0.8rem; color: #666;">
+              Korrekte Züge: ${appState.trainingHistory.filter(h => h.correct).length} | 
+              Falsche Züge: ${appState.trainingHistory.filter(h => !h.correct).length}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
 }
 
 /**
  * End training mode
  */
 function endTrainingMode() {
+  console.log('🏁 Ending training mode...');
+  
+  // Reset training state
   appState.trainingMode = false;
   appState.isOpponentTurn = false;
+  appState.trainingHistory = [];
   
-  // Hide training UI
+  // Hide training UI elements
   const trainingIndicator = document.getElementById('trainingModeIndicator');
   if (trainingIndicator) {
     trainingIndicator.style.display = 'none';
@@ -911,7 +1087,38 @@ function endTrainingMode() {
     feedbackDiv.style.display = 'none';
   }
   
-  console.log('🏁 Training mode ended');
+  const endTrainingBtn = document.getElementById('endTrainingBtn');
+  if (endTrainingBtn) {
+    endTrainingBtn.style.display = 'none';
+  }
+  
+  // Reset analysis results section
+  const analysisResults = document.getElementById('analysisResults');
+  if (analysisResults) {
+    analysisResults.style.display = 'none';
+  }
+  
+  // Reset section titles
+  const resultsHeader = analysisResults?.querySelector('.results-header h3');
+  if (resultsHeader) {
+    resultsHeader.textContent = 'Opening Analysis Results';
+  }
+  
+  const movesHeader = document.querySelector('#movesSection h4');
+  if (movesHeader) {
+    movesHeader.textContent = 'Available Moves';
+  }
+  
+  // Clear moves list
+  const movesList = document.getElementById('movesList');
+  if (movesList) {
+    movesList.innerHTML = '';
+  }
+  
+  // Show end training feedback
+  showTrainingFeedback('🏁 Training beendet!', 'info');
+  
+  console.log('✅ Training mode ended successfully');
 }
 
 // ====================================================================
@@ -2005,6 +2212,35 @@ window.updateLegalMovesFromBackend = function() {
   });
   console.log('[updateLegalMovesFromBackend] Legal moves updated');
 };
+
+/**
+ * Check if a move exists in the current repertoire (without creating new nodes)
+ */
+async function checkMoveInRepertoire(moveSan) {
+  try {
+    console.log(`🔍 Checking if move ${moveSan} exists in repertoire...`);
+    console.log(`🔍 Current available moves:`, appState.availableMoves?.map(m => m.san) || []);
+    
+    // Get current available moves from appState
+    const availableMoves = appState.availableMoves || [];
+    
+    // Check if the move exists in current available moves
+    const moveExists = availableMoves.some(move => move.san === moveSan);
+    
+    if (moveExists) {
+      console.log(`✅ Move ${moveSan} found in current repertoire`);
+      return true;
+    }
+    
+    console.log(`❌ Move ${moveSan} not found in current repertoire`);
+    console.log(`❌ Available moves were:`, availableMoves.map(m => m.san));
+    return false;
+    
+  } catch (error) {
+    console.error('❌ Error checking move in repertoire:', error);
+    return false;
+  }
+}
 
 // Helper: Ensure node_id is set for the current position (fetch if missing)
 async function ensureNodeIdForCurrentPosition() {
