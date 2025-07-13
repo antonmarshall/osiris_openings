@@ -28,7 +28,7 @@
     <h1>horus openings</h1>
     <!-- Menü-Bereich: Spielerwahl & Neuer Spieler (zentriert, modern) -->    <div class="section player-menu" style="max-width: 800px; margin: 0 auto 30px auto; padding: 0 20px;">
       <div class="player-controls" style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: start;">
-        <!-- Vorhandene Spieler -->        <div class="existing-players" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef; height: 280px; display: flex; flex-direction: column;">
+        <!-- Vorhandene Spieler -->        <div class="existing-players" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef;">
           <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Vorhandene Spieler</h3>
           
           <select id="playerSelect" style="
@@ -39,14 +39,14 @@
             background: #fff; 
             color: #495057; 
             outline: none; 
-            margin-bottom: 16px;
+            margin-bottom: 24px;
             width: 100%;
             box-sizing: border-box;
           ">
             <option>Lade Spieler...</option>
           </select>
           
-          <div class="color-filter" style="margin-bottom: 20px; text-align: center;">
+          <div class="color-filter" style="margin-bottom: 32px; text-align: center;">
             <label style="margin-right: 20px; font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
               <input type="radio" name="colorSelect" value="white" checked style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Weiß
             </label>
@@ -56,7 +56,6 @@
           </div>
           
           <button id="analyzeBtn" class="analyze-btn" style="
-            margin-top: auto; 
             padding: 16px 20px; 
             border-radius: 8px; 
             background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); 
@@ -70,8 +69,10 @@
           ">
             📊 Eröffnungen analysieren
           </button>
+          
+          <div style="margin-top: 12px; min-height: 22px;"></div>
         </div>
-        <!-- Neuer Spieler -->        <div class="new-player" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef; height: 280px; display: flex; flex-direction: column;">
+        <!-- Neuer Spieler -->        <div class="new-player" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef;">
           <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Neuen Spieler hinzufügen</h3>
           
           <input type="text" id="newPlayerName" placeholder="z.B. Magnus_Carlsen" style="
@@ -101,7 +102,6 @@
           ">
           
           <button id="downloadPlayer" style="
-            margin-top: auto; 
             padding: 16px 20px; 
             border-radius: 8px; 
             background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); 
