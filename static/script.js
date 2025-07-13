@@ -943,12 +943,13 @@ function updatePositionStats(stats) {
 function updateMovesList(moves) {
   const movesList = document.getElementById('movesList');
   if (!movesList) return;
-  
-  if (moves.length === 0) {
+  // Filter out temporary moves
+  const filteredMoves = moves.filter(move => !move.is_temporary);
+  if (filteredMoves.length === 0) {
     movesList.innerHTML = '<p style="color: #666; font-style: italic;">No more moves available from this position.</p>';
     return;
   }
-    const movesHtml = moves.map((move, index) => {
+  const movesHtml = filteredMoves.map((move, index) => {
     // BACKEND-FOKUSSIERT: Use backend-calculated color directly (no frontend calculation)
     const backendColor = move.color || '#888888'; // Backend provides optimal color
     return `
@@ -978,9 +979,7 @@ function updateMovesList(moves) {
       </div>
     `;
   }).join('');
-  
   movesList.innerHTML = movesHtml;
-  
   // Re-add click listeners
   addMoveClickListeners();
 }
@@ -1326,8 +1325,9 @@ function setupEventListeners() {
    */
   async function handleDragDropMove(from, to) {
     console.log(`🖱️ CLICK-TO-MOVE: Processing move ${from} → ${to}`);
-    // Prüfe Repertoire-Modus
-    const isOwnRepertoire = appState.currentPlayer === 'white_repertoir' || appState.currentPlayer === 'black_repertoir';
+    // Robust repertoire check (case-insensitive, includes 'my repertoire')
+    const repertoireNames = ['my repertoire', 'white_repertoir', 'black_repertoir'];
+    const isOwnRepertoire = repertoireNames.includes((appState.currentPlayer || '').toLowerCase());
     if (isOwnRepertoire) {
       // In Repertoire-Modus: Erlaube jeden legalen Zug laut chess.js
       const Chess = window.game.constructor;
@@ -1344,7 +1344,6 @@ function setupEventListeners() {
       const moveSan = found.san;
       console.log('✅ [REPERTOIRE MODUS] Legal move played:', from, to, '| New FEN:', newFen, '| SAN:', moveSan);
       // Always send the move to the backend, regardless of whether it is in the tree.
-      // The backend will return the existing child node or create a new one if needed.
       const childNode = await sendMoveToBackend(moveSan);
       if (childNode) {
         updateAppStateWithNode(childNode);
@@ -1558,7 +1557,9 @@ window.updateLegalMovesFromBackend = function() {
     console.warn('[updateLegalMovesFromBackend] Chessground not initialized');
     return;
   }
-  const isOwnRepertoire = appState.currentPlayer === 'white_repertoir' || appState.currentPlayer === 'black_repertoir';
+  // Robust repertoire check (case-insensitive, includes 'my repertoire')
+  const repertoireNames = ['my repertoire', 'white_repertoir', 'black_repertoir'];
+  const isOwnRepertoire = repertoireNames.includes((appState.currentPlayer || '').toLowerCase());
   let dests = new Map();
   if (isOwnRepertoire) {
     const Chess = window.game.constructor;

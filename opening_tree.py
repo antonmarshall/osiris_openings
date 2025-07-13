@@ -16,9 +16,9 @@ class Node:
     """
     Knoten im Eröffnungsbaum, der eine Schachstellung und Statistiken repräsentiert.
     """
-    __slots__ = ("id", "fen", "games", "wins", "draws", "losses", "children", "games_info", "move_counts", "elo_diff_sum", "elo_diff_count", "move_dates", "move_san", "parent_fen", "parent_id", "source_files", "is_in_repertoire")
+    __slots__ = ("id", "fen", "games", "wins", "draws", "losses", "children", "games_info", "move_counts", "elo_diff_sum", "elo_diff_count", "move_dates", "move_san", "parent_fen", "parent_id", "source_files", "is_in_repertoire", "is_temporary")
     
-    def __init__(self, fen: str, move_san: Optional[str] = None, parent_fen: Optional[str] = None, parent_id: Optional[str] = None, is_in_repertoire: bool = True):
+    def __init__(self, fen: str, move_san: Optional[str] = None, parent_fen: Optional[str] = None, parent_id: Optional[str] = None, is_in_repertoire: bool = True, is_temporary: bool = False):
         self.id = str(uuid.uuid4())
         self.fen = fen
         self.move_san = move_san
@@ -36,6 +36,7 @@ class Node:
         self.move_dates: Dict[str, List[str]] = {}
         self.source_files: Set[str] = set()
         self.is_in_repertoire = is_in_repertoire
+        self.is_temporary = is_temporary
 
     def add_child(self, move_uci: str, child_node: 'Node'):
         self.children[move_uci] = child_node
@@ -115,7 +116,8 @@ class Node:
             'losses': self.losses,
             'win_rate': round(win_rate, 2),
             'color': color,
-            'game_info': self.games_info[:10] # Limit game_info for brevity
+            'game_info': self.games_info[:10], # Limit game_info for brevity
+            'is_temporary': self.is_temporary,
         }
           # Only include children if requested, within depth limit, and we have children
         if include_children and current_depth < max_depth and self.children:
@@ -125,7 +127,7 @@ class Node:
                 max_depth, 
                 current_depth + 1, 
                 is_repertoire
-            ) for uci, child in self.children.items()}
+            ) for uci, child in self.children.items() if not getattr(child, 'is_temporary', False)}
         else:
             result['children'] = {}
         
@@ -589,7 +591,7 @@ class OpeningTree:
         # 5. If not, create the child node, add it to the tree, and return its to_dict(...)
         board.push(move)  # <-- Apply the move before getting the FEN!
         new_fen = board.fen()
-        child_node = Node(new_fen, move_san=move_san, parent_fen=current_node.fen, parent_id=current_node.id, is_in_repertoire=self.own_repertoir)
+        child_node = Node(new_fen, move_san=move_san, parent_fen=current_node.fen, parent_id=current_node.id, is_in_repertoire=self.own_repertoir, is_temporary=True)
         current_node.add_child(move_uci, child_node)
         self.nodes[child_node.id] = child_node
         self.nodes_by_fen[self._get_node_key(new_fen)] = child_node
