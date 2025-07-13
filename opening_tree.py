@@ -572,10 +572,12 @@ class OpeningTree:
             return node.source_files.copy()
         return set()
 
-    def get_or_create_child_by_id_and_move(self, node_id: str, move_san: str, legal_moves=None):
+    def get_or_create_child_by_id_and_move(self, node_id: str, move_san: str, save_switch_active: bool = False, legal_moves=None):
         import chess
         import logging
         import traceback
+        import os
+        from add_opening_lines import smart_save_opening_line
         logger = logging.getLogger("opening_tree")
         # 1. Find the current node
         current_node = self.nodes.get(node_id)
@@ -599,8 +601,65 @@ class OpeningTree:
         board.push(move)  # <-- Apply the move before getting the FEN!
         new_fen = board.fen()
         child_node = Node(new_fen, move_san=move_san, parent_fen=current_node.fen, parent_id=current_node.id, is_in_repertoire=self.own_repertoir)
-        logger.info(f"[NODE CREATE] move={move_san} parent={current_node.id[:8]} id={child_node.id[:8]} games={child_node.games} context=get_or_create_child_by_id_and_move")
+        
+        # Set games count based on save switch
+        if save_switch_active:
+            child_node.games = 1
+            logger.info(f"[NODE CREATE] move={move_san} parent={current_node.id[:8]} id={child_node.id[:8]} games={child_node.games} context=get_or_create_child_by_id_and_move SAVED")
+            logger.warning(f"[PGN-DEBUG] save_switch_active=True, will try to save PGN for player={self.player_name}, move={move_san}, node_id={node_id}")
+            try:
+                # Find path from root to current position using parent IDs
+                path_to_current = self._find_path_to_root(current_node)
+                complete_path = path_to_current + [move_san]
+                start_fen = chess.STARTING_FEN
+                logger.warning(f"[PGN-DEBUG] About to call smart_save_opening_line(player={self.player_name}, start_fen={start_fen}, complete_path={complete_path})")
+                file_name, replaced_files = smart_save_opening_line(self.player_name, start_fen, complete_path)
+                logger.warning(f"[PGN-DEBUG] smart_save_opening_line returned file_name={file_name}, replaced_files={replaced_files}")
+                pgn_path = os.path.join("players", self.player_name, 'pgn', file_name)
+                if os.path.exists(pgn_path):
+                    import chess.pgn
+                    with open(pgn_path, 'r', encoding='utf-8', errors='ignore') as pgn_file:
+                        new_game = chess.pgn.read_game(pgn_file)
+                    if new_game is not None:
+                        headers = new_game.headers
+                        white_elo = self._safe_int(headers.get("WhiteElo"))
+                        black_elo = self._safe_int(headers.get("BlackElo"))
+                        game_details = dict(headers)
+                        player_color, result_for_player, skip_stats, actual_color, skip_reason = self._get_player_perspective_color_and_result(
+                            headers, self.player_name, self.current_perspective_color)
+                        if player_color is not None:
+                            self.add_game_to_tree(
+                                new_game, pgn_path, player_color, result_for_player, skip_stats, game_details, white_elo, black_elo)
+                            logger.warning(f"[PGN-DEBUG] Tree updated with new PGN file {file_name}")
+            except Exception as e:
+                logger.error(f"[PGN-DEBUG] Exception while saving PGN: {e}")
+                logger.error(traceback.format_exc())
+        else:
+            child_node.games = 0
+            logger.info(f"[NODE CREATE] move={move_san} parent={current_node.id[:8]} id={child_node.id[:8]} games={child_node.games} context=get_or_create_child_by_id_and_move TEMPORARY")
+        
         current_node.add_child(move_uci, child_node)
         self.nodes[child_node.id] = child_node
         self.nodes_by_fen[self._get_node_key(new_fen)] = child_node
         return child_node.to_dict(self.current_perspective_color, include_children=True)
+    
+    def _find_path_to_root(self, current_node):
+        """
+        Findet den Pfad von der aktuellen Position zur Wurzel durch Parent-IDs.
+        Returns: Liste von SAN-Zügen von Wurzel zur aktuellen Position.
+        """
+        path = []
+        node = current_node
+        while node.parent_id is not None:
+            path.append(node.move_san)
+            node = self.nodes.get(node.parent_id)
+            if node is None:
+                break
+        return path[::-1]  # Umkehren für korrekte Reihenfolge
+    
+    def _safe_int(self, value):
+        """Safe integer conversion"""
+        try:
+            return int(value) if value else 0
+        except (ValueError, TypeError):
+            return 0

@@ -1070,179 +1070,7 @@ async def api_add_opening_line(
         logger.exception("Detailed unexpected error:")
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
-@app.post("/api/add_single_move")
-async def api_add_single_move(
-    frontend_player_name: str = Body(..., alias="player_name"),
-    current_fen: str = Body(..., alias="current_fen"),  # Position VOR dem Zug
-    move_san: str = Body(..., alias="move_san"),        # Der neue Zug (z.B. "e5")
-    perspective_color: str = Body(default="white", alias="color")
-):
-    logger.info(f"[API CALL] /api/add_single_move: player={frontend_player_name}, fen={current_fen}, move={move_san}, color={perspective_color}")
-    """
-    Fügt einen einzelnen Zug zur Repertoire-Linie hinzu.
-    Bekommt die aktuelle Position und einen Zug, berechnet selbst die neue Position.
-    """
-    global opening_tree, current_player
-    try:
-        # Resolve frontend player to actual backend player
-        player_name = resolve_player_name(frontend_player_name, perspective_color)
-        
-        # BUTTON PRESS LOGGING: "Save to Repertoire" functionality
-        # Log single move addition request
-        logger.info(f"💾 Save to Repertoire: frontend_player={frontend_player_name}, backend_player={player_name}, current_fen={current_fen}, move={move_san}, color={perspective_color}")
-        
-        # Check if this player can save opening lines
-        if get_player_type(player_name) != "repertoire":
-            logger.warning(f"[add_single_move] ❌ Player {player_name} is not a repertoire player")
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Opening lines can only be saved for repertoire players. '{player_name}' is an analysis player."
-            )
-        
-        # Validiere den Zug von der aktuellen Position
-        try:
-            board = chess.Board(current_fen)
-            logger.info(f"[add_single_move] Board created from FEN: {current_fen}")
-            logger.info(f"[add_single_move] Legal moves: {[board.san(move) for move in list(board.legal_moves)[:10]]}")
-            
-            # Parse und validiere den Zug
-            move = board.parse_san(move_san)
-            logger.info(f"[add_single_move] Move '{move_san}' parsed as UCI: {move.uci()}")
-            
-            # Führe den Zug aus
-            board.push(move)
-            new_fen = board.fen()
-            logger.info(f"[add_single_move] New position after move: {new_fen}")
-            
-        except Exception as e:
-            logger.error(f"[add_single_move] Invalid move '{move_san}' from position {current_fen}: {e}")
-            # Zeige legale Züge für besseres Debugging
-            try:
-                board = chess.Board(current_fen)
-                legal_moves = [board.san(move) for move in board.legal_moves]
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Illegal move '{move_san}' from position. Legal moves: {', '.join(legal_moves[:10])}{'...' if len(legal_moves) > 10 else ''}"
-                )
-            except:
-                raise HTTPException(status_code=400, detail=f"Invalid move '{move_san}' or invalid position")
-        
-        # Berechne die komplette Zuglinie vom Startposition bis zur neuen Position
-        # Das machen wir, indem wir den Pfad im Tree verfolgen
-        start_fen = chess.STARTING_FEN
-        moves_to_new_position = []
-        
-        # Initialisiere oder lade den Tree für diesen Spieler
-        if opening_tree is None or current_player != player_name or opening_tree.player_name != player_name:
-            logger.info(f"[add_single_move] Initializing tree for {player_name}")
-            current_player = player_name
-            opening_tree = OpeningTree(player_name=current_player, initial_perspective_color=perspective_color, own_repertoir=True)
-            
-            # Lade existierende PGNs
-            player_pgn_dir = os.path.join(PGN_BASE_DIR, current_player, "pgn")
-            if os.path.exists(player_pgn_dir):
-                logger.info(f"[add_single_move] Loading existing PGNs for {current_player}")
-                load_stats = _load_pgns_for_player(current_player, player_pgn_dir, opening_tree, detailed_logging=False)
-                logger.info(f"[add_single_move] Loaded {load_stats['games_loaded']} games from existing PGNs")
-        
-        # Finde den Pfad vom Start zur aktuellen Position
-        normalized_current_fen = opening_tree.normalize_fen(current_fen)
-        logger.info(f"[add_single_move] Looking for path to normalized FEN: {normalized_current_fen}")
-        
-        # Einfache Implementierung: Rekonstruiere den Pfad durch Tree-Traversierung
-        def find_path_to_fen(target_fen):
-            """Findet den Pfad (Liste von SAN-Zügen) vom Start zu einer gegebenen FEN"""
-            visited = set()
-            
-            def dfs(current_node, current_path, current_fen_key):
-                if current_fen_key in visited:
-                    return None
-                visited.add(current_fen_key)
-                
-                if current_fen_key == target_fen:
-                    return current_path
-                
-                for uci, child_node in current_node.children.items():
-                    child_path = current_path + [child_node.move_san]
-                    result = dfs(child_node, child_path, child_node.fen)
-                    if result is not None:
-                        return result
-                
-                return None
-            
-            root_node = opening_tree.nodes.get(opening_tree.normalize_fen(chess.STARTING_FEN))
-            if root_node:
-                return dfs(root_node, [], opening_tree.normalize_fen(chess.STARTING_FEN))
-            return None
-        
-        path_to_current = find_path_to_fen(normalized_current_fen)
-        if path_to_current is None:
-            # Fallback: Die aktuelle Position ist noch nicht im Tree, starte von Anfang
-            logger.info(f"[add_single_move] 🎯 Position noch nicht im Tree - starte von Wurzel")
-            path_to_current = []
-        
-        # Vollständiger Pfad = Pfad zur aktuellen Position + neuer Zug
-        complete_path = path_to_current + [move_san]
-        logger.info(f"[add_single_move] Complete path to save: {complete_path}")
-        
-        # Speichere die komplette Linie mit der bestehenden Funktion
-        # Speichere die komplette Linie mit der bestehenden Funktion
-        file_name, replaced_files = smart_save_opening_line(player_name, start_fen, complete_path)
-        
-        if replaced_files:
-            logger.info(f"[add_single_move] Replaced {len(replaced_files)} files with {file_name}")
-        else:
-            logger.info(f"[add_single_move] Created new file: {file_name}")
-        
-        # Update tree (ähnlich wie in der ursprünglichen Funktion)
-        if replaced_files:
-            # Tree komplett neu laden
-            opening_tree = OpeningTree(player_name, perspective_color, own_repertoir=True)
-            current_player = player_name
-            player_pgn_dir = os.path.join(PGN_BASE_DIR, current_player, "pgn")
-            if os.path.exists(player_pgn_dir):
-                load_stats = _load_pgns_for_player(current_player, player_pgn_dir, opening_tree, detailed_logging=False)
-                logger.info(f"[add_single_move] Tree reloaded with {load_stats['games_loaded']} games from {load_stats['files_processed']} files.")
-            else:
-                logger.warning(f"[add_single_move] No PGN directory found after replacement: {player_pgn_dir}")
-        else:
-            # Nur neue Datei zum Tree hinzufügen
-            pgn_path = os.path.join(PGN_BASE_DIR, player_name, 'pgn', file_name)
-            try:
-                with open(pgn_path, 'r', encoding='utf-8', errors='ignore') as pgn_file:
-                    new_game = chess.pgn.read_game(pgn_file)
-                if new_game is not None:
-                    headers = new_game.headers
-                    white_elo = safe_int(headers.get("WhiteElo"))
-                    black_elo = safe_int(headers.get("BlackElo"))
-                    game_details = dict(headers)
-                    player_color, result_for_player, skip_stats, actual_color, skip_reason = opening_tree._get_player_perspective_color_and_result(
-                        headers, player_name, perspective_color)
-                    if player_color is not None:
-                        opening_tree.add_game_to_tree(
-                            new_game, pgn_path, player_color, result_for_player, skip_stats, game_details, white_elo, black_elo)
-                        logger.info(f"[add_single_move] Tree updated with new game")
-            except Exception as e:
-                logger.error(f"[add_single_move] Error updating tree: {e}")
-        
-        message = f"Zug '{move_san}' erfolgreich zur Linie hinzugefügt"
-        if replaced_files:
-            message += f" ({len(replaced_files)} Datei(en) ersetzt)"
-        
-        return JSONResponse(status_code=201, content={
-            "success": True,
-            "message": message,
-            "file": file_name,
-            "complete_path": complete_path,
-            "new_fen": new_fen
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[add_single_move] Unexpected error: {e}")
-        logger.exception("Detailed error:")
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+# REMOVED: /api/add_single_move endpoint - functionality now integrated into get_or_create_child_by_id_and_move
 
 # Middleware zum Unterdrücken des Access-Logs für /api/progress Requests
 class SuppressProgressLogMiddleware(BaseHTTPMiddleware):
@@ -1356,11 +1184,12 @@ async def get_child_node(request: Request):
         data = await request.json()
         node_id = data.get("node_id")
         move_san = data.get("move_san")
+        save_switch_active = data.get("save_switch_active", False)
         if not node_id or not move_san:
             response = {"success": False, "error": "node_id and move_san required"}
             logger.error(f"[get_child_node] {response}")
             return JSONResponse(response, status_code=400)
-        child_node_dict = opening_tree.get_or_create_child_by_id_and_move(node_id, move_san)
+        child_node_dict = opening_tree.get_or_create_child_by_id_and_move(node_id, move_san, save_switch_active=save_switch_active)
         response = {"success": True, "child": child_node_dict}
         logger.info(f"[get_child_node] Returning: {json.dumps(response)[:500]}...")
         return JSONResponse(response)

@@ -941,7 +941,7 @@ function updateMovesList(moves) {
     movesList.innerHTML = '<p style="color: #666; font-style: italic;">No more moves available from this position.</p>';
     return;
   }
-  const movesHtml = moves.map((move, index) => {
+    const movesHtml = moves.map((move, index) => {
     // BACKEND-FOKUSSIERT: Use backend-calculated color directly (no frontend calculation)
     const backendColor = move.color || '#888888'; // Backend provides optimal color
     return `
@@ -1333,23 +1333,8 @@ function setupEventListeners() {
       // Check if move is already in the tree
       const moveInTree = appState.availableMoves.some(m => m.uci === from + to);
       if (!moveInTree) {
-        // This is a new/temporary move
-        const saveSwitch = document.getElementById('saveToRepertoireSwitch');
-        if (saveSwitch && saveSwitch.checked) {
-          // Save to repertoire immediately and create permanent node
-          await fetch('/api/add_single_move', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              player_name: appState.currentPlayer,
-              current_fen: appState.currentPosition,
-              move_san: found.san,
-              color: appState.currentColor
-            })
-          });
-          // After saving, reload the repertoire for this position
-          await loadMovesForPosition(appState.currentPosition);
-        }
+        // This is a new/temporary move - handled by sendMoveToBackend with save_switch_active
+        console.log('🆕 New move detected - will be handled by sendMoveToBackend');
       }
       tempGame.move({ from, to });
       const newFen = tempGame.fen();
@@ -1664,14 +1649,24 @@ async function sendMoveToBackend(moveSan) {
     console.warn('⚠️ Cannot send move to backend: missing node_id or moveSan', { nodeId: appState.currentNodeId, moveSan });
     return null;
   }
+  
+  // Check if save switch is active
+  const saveSwitch = document.getElementById('saveToRepertoireSwitch');
+  const saveSwitchActive = saveSwitch ? saveSwitch.checked : false;
+  
   try {
-    console.log('[sendMoveToBackend] Sending move to backend', { nodeId: appState.currentNodeId, moveSan });
+    console.log('[sendMoveToBackend] Sending move to backend', { 
+      nodeId: appState.currentNodeId, 
+      moveSan, 
+      saveSwitchActive 
+    });
     const response = await fetch('/api/get_child_node', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         node_id: appState.currentNodeId,
-        move_san: moveSan
+        move_san: moveSan,
+        save_switch_active: saveSwitchActive
       })
     });
     const data = await response.json();
