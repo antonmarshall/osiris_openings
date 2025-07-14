@@ -149,7 +149,13 @@ let appState = {
   // --- Training Mode State ---
   trainingMode: false,       // <--- NEU: Training mode flag
   isOpponentTurn: false,     // <--- NEU: Whose turn in training
-  trainingHistory: []        // <--- NEU: Training move history
+  trainingHistory: [],       // <--- NEU: Training move history
+  // --- Learning Status State ---
+  trainingSessionId: null,   // <--- NEU: Session tracking
+  studiedNodes: new Set(),   // <--- NEU: Track studied nodes
+  unstudiedMovesOnly: true,  // <--- NEU: Filter mode
+  directlyLearnedNodes: new Set(), // <--- NEU: Direkt gelernte Züge
+  mistakeCount: 0           // <--- NEU: Fehlerzähler
 };
 
 // ✅ CRITICAL FIX: Expose appState globally for script-cg.js access
@@ -371,7 +377,7 @@ function displayAnalysisResults(data, playerName, color) {
   if (positionInfo) {
     positionInfo.innerHTML = `
       <strong>Player:</strong> ${playerName} (${color}) | 
-      <strong>Position:</strong> ${data.position.substring(0, 30)}...
+      <strong>Position:</strong> ${data.position}
     `;
   }
     // Update position statistics
@@ -664,6 +670,10 @@ async function startTrainingMode(playerColor) {
       throw new Error('Failed to load repertoire tree');
     }
     
+    // Generate unique session ID for learning tracking
+    appState.trainingSessionId = `training_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    appState.studiedNodes.clear();
+    
     // Initialize training state
     appState.currentPosition = data.position;
     appState.availableMoves = data.moves || [];
@@ -699,75 +709,106 @@ async function handleTrainingMove(from, to) {
   if (!appState.trainingMode || appState.isOpponentTurn) {
     return; // Not in training mode or not player's turn
   }
-  
+
   try {
     console.log(`🎯 Training move: ${from} → ${to}`);
-    
+
     // Get move SAN using chess.js
     const Chess = window.game.constructor;
     const tempGame = new Chess(appState.currentPosition);
     const legalMoves = tempGame.moves({ verbose: true });
     const found = legalMoves.find(m => m.from === from && m.to === to);
-    
+
     if (!found) {
       showTrainingFeedback(`❌ ${from}→${to} ist kein legaler Zug!`, 'error');
       return;
     }
-    
+
     const moveSan = found.san;
-    
+
     // STEP 1: Play the move visually on the board first
     tempGame.move({ from, to });
     const newFen = tempGame.fen();
     renderChessBoard(newFen, appState.currentColor);
-    
+
     // STEP 2: Check if move exists in repertoire
     const moveExists = await checkMoveInRepertoire(moveSan);
-    
+
     if (moveExists) {
-      // ✅ POSITIVE FEEDBACK - Move is in repertoire
-      showTrainingFeedback(`✅ Richtig! ${moveSan} ist in deinem Repertoire!`, 'success');
-      
-      // STEP 3: Update backend state
+      // --- NEU: Edge-Case-Logik für bereits gelernte Züge ---
+      // Hole die Node-ID für den gespielten Zug
       const childNode = await sendMoveToBackend(moveSan);
       if (childNode) {
         updateAppStateWithNode(childNode);
+        const alreadyLearned = appState.directlyLearnedNodes.has(childNode.id);
+        // Hole alle noch nicht gelernten eigenen Repertoire-Züge
+        const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+        const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false); // Filter für eigene Züge, falls Flag vorhanden
+        if (alreadyLearned && unstudiedOwnMoves.length > 0) {
+          // Freundlicher Hinweis + Button
+          showTrainingFeedback(
+            `✅ Du hast diesen Zug bereits gelernt! Es gibt noch weitere Züge, die du lernen kannst. <button id='showUnlearnedMovesBtn' style='margin-left:12px;padding:4px 10px;font-size:0.95rem;'>zeige offene Züge</button>`,
+            'info'
+          );
+          // Button-Listener für offene Züge
+          setTimeout(() => {
+            const btn = document.getElementById('showUnlearnedMovesBtn');
+            if (btn) {
+              btn.onclick = async () => {
+                showAvailableMovesArrows(unstudiedOwnMoves);
+                showTrainingFeedback('🏹 Noch offene Züge werden angezeigt!', 'info');
+              };
+            }
+          }, 100);
+          return;
+        } else if (alreadyLearned && unstudiedOwnMoves.length === 0) {
+          showTrainingFeedback('🎓 Alle Züge aus dieser Stellung gelernt!', 'success');
+          return;
+        }
+        // --- Normale Lernlogik, wenn Zug noch nicht gelernt ---
+        showTrainingFeedback(`✅ Richtig! ${moveSan} ist in deinem Repertoire!`, 'success');
+        appState.trainingHistory.push({
+          position: appState.currentPosition,
+          move: moveSan,
+          correct: true
+        });
+        // STEP 4: Mark node as studied if it's a leaf node (no children)
+        if (!childNode.children || Object.keys(childNode.children).length === 0) {
+          console.log(`🎓 Leaf node reached - marking as studied`);
+          await markNodeAsStudied(childNode.id, appState.trainingSessionId);
+          // STEP 5: Return to start position after completing a line
+          console.log(`🔄 Line completed - returning to start position`);
+          showTrainingFeedback('🎓 Linie gelernt! Zurück zur Startposition...', 'success');
+          setTimeout(async () => {
+            await returnToStartPosition();
+          }, 2000);
+          updateTrainingStatus();
+          return;
+        }
+        updateTrainingStatus();
+        appState.isOpponentTurn = true;
+        setTimeout(() => playOpponentMove(), 1500);
+        return;
       }
-      
-      // Add to training history
-      appState.trainingHistory.push({
-        position: appState.currentPosition,
-        move: moveSan,
-        correct: true
-      });
-      
-      // Update training status to show the new count
-      updateTrainingStatus();
-      
-      // Opponent's turn
-      appState.isOpponentTurn = true;
-      setTimeout(() => playOpponentMove(), 1500); // 1.5 second delay
-      
-    } else {
-      // ❌ NEGATIVE FEEDBACK - Move not in repertoire
-      showTrainingFeedback(`❌ ${moveSan} ist nicht in deinem Repertoire!`, 'error');
-      
-      // STEP 3: Reset board to current position after delay
-      setTimeout(() => {
-        renderChessBoard(appState.currentPosition, appState.currentColor);
-      }, 1000); // Show the wrong move for 1 second, then reset
-      
-      // Add to training history
-      appState.trainingHistory.push({
-        position: appState.currentPosition,
-        move: moveSan,
-        correct: false
-      });
-      
-      // Update training status to show the new count
-      updateTrainingStatus();
     }
-    
+    // ❌ NEGATIVE FEEDBACK - Move not in repertoire
+    showTrainingFeedback(`❌ ${moveSan} ist nicht in deinem Repertoire!`, 'error');
+    setTimeout(() => {
+      renderChessBoard(appState.currentPosition, appState.currentColor);
+    }, 1000);
+    appState.trainingHistory.push({
+      position: appState.currentPosition,
+      move: moveSan,
+      correct: false
+    });
+    // --- NEU: Zeige offene Züge nach Fehler ---
+    const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+    const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false);
+    if (unstudiedOwnMoves.length > 0) {
+      showAvailableMovesArrows(unstudiedOwnMoves);
+      showTrainingFeedback('🏹 Noch offene Züge werden angezeigt!', 'info');
+    }
+    updateTrainingStatus();
   } catch (error) {
     console.error('❌ Error in training move:', error);
     showTrainingFeedback('❌ Fehler beim Verarbeiten des Zugs!', 'error');
@@ -783,27 +824,45 @@ async function playOpponentMove() {
   }
   
   try {
-    console.log('🤖 Opponent turn...');
+    console.log('🤖 Opponent is thinking...');
     
-    const availableTreeMoves = appState.availableMoves;
+    // Get unstudied moves from current position
+    let availableMoves = [];
+    if (appState.trainingSessionId && appState.unstudiedMovesOnly) {
+      availableMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+    } else {
+      availableMoves = appState.availableMoves || [];
+    }
     
-    if (availableTreeMoves.length === 0) {
-      console.log('🏁 No more moves in tree - training complete!');
-      showTrainingFeedback('🏁 Training beendet - keine weiteren Züge im Repertoire!', 'info');
+    if (availableMoves.length === 0) {
+      console.log('🤖 No unstudied moves available - marking current position as studied');
+      
+      // Mark current position as studied if no unstudied moves
+      if (appState.currentNodeId && appState.trainingSessionId) {
+        await markNodeAsStudied(appState.currentNodeId, appState.trainingSessionId);
+      }
+      
+      showTrainingFeedback('🎓 Alle Züge aus dieser Position gelernt!', 'success');
+      
+      // Return to start position after a short delay
+      setTimeout(async () => {
+        await returnToStartPosition();
+      }, 2000); // 2 second delay to show completion message
+      
       return;
     }
     
-    // Select random move from tree
-    const randomIndex = Math.floor(Math.random() * availableTreeMoves.length);
-    const randomMove = availableTreeMoves[randomIndex];
+    // Select random move from unstudied moves
+    const randomIndex = Math.floor(Math.random() * availableMoves.length);
+    const selectedMove = availableMoves[randomIndex];
     
-    console.log(`🤖 Opponent plays: ${randomMove.san}`);
+    console.log(`🤖 Opponent plays unstudied move: ${selectedMove.san}`);
     
-    // Show opponent move info
-    showTrainingFeedback(`🤖 Gegner spielt: ${randomMove.san}`, 'info');
+    // Show opponent move feedback
+    showTrainingFeedback(`🤖 Gegner spielt: ${selectedMove.san}`, 'info');
     
     // Play the move
-    const childNode = await sendMoveToBackend(randomMove.san);
+    const childNode = await sendMoveToBackend(selectedMove.san);
     if (childNode) {
       updateAppStateWithNode(childNode);
       
@@ -933,28 +992,15 @@ function showTrainingModeUI() {
     resultsHeader.textContent = '🎯 Repertoire Training';
   }
   
-  // Show training mode indicator
-  let trainingIndicator = document.getElementById('trainingModeIndicator');
-  if (!trainingIndicator) {
-    trainingIndicator = document.createElement('div');
-    trainingIndicator.id = 'trainingModeIndicator';
-    trainingIndicator.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      background: #e67e22;
-      color: white;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      z-index: 1000;
-      box-shadow: 0 2px 8px rgba(230, 126, 34, 0.3);
-    `;
-    document.body.appendChild(trainingIndicator);
-  }
+  // Hide training mode indicator (removed as requested)
+  // Note: Training mode indicator was removed from top-left
   
-  trainingIndicator.textContent = '🎯 Trainingsmodus aktiv';
-  trainingIndicator.style.display = 'block';
+  // Hide save to repertoire switch in training mode
+  const saveSwitch = document.getElementById('saveToRepertoireSwitch');
+  const saveSwitchLabel = saveSwitch?.closest('.switch-label');
+  if (saveSwitchLabel) {
+    saveSwitchLabel.style.display = 'none';
+  }
   
   // Create training feedback area
   let feedbackDiv = document.getElementById('trainingFeedback');
@@ -1035,13 +1081,19 @@ function showTrainingModeUI() {
 /**
  * Update training status display
  */
-function updateTrainingStatus() {
+async function updateTrainingStatus() {
   if (!appState.trainingMode) return;
   
   const movesList = document.getElementById('movesList');
   if (movesList) {
     const statusText = appState.isOpponentTurn ? 'Gegner ist am Zug' : 'Du bist am Zug';
     const statusColor = appState.isOpponentTurn ? '#e67e22' : '#27ae60';
+    
+    // Get learning progress if session is active
+    let learningProgress = null;
+    if (appState.trainingSessionId) {
+      learningProgress = await getLearningProgress(appState.trainingSessionId);
+    }
     
     movesList.innerHTML = `
       <div style="text-align: center; padding: 20px; color: #666;">
@@ -1057,6 +1109,17 @@ function updateTrainingStatus() {
             <div style="font-size: 0.8rem; color: #666;">
               Korrekte Züge: ${appState.trainingHistory.filter(h => h.correct).length} | 
               Falsche Züge: ${appState.trainingHistory.filter(h => !h.correct).length}
+            </div>
+          </div>
+        ` : ''}
+        ${learningProgress ? `
+          <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
+            <div style="font-size: 0.9rem; margin-bottom: 8px; font-weight: 600;">Lernfortschritt:</div>
+            <div style="font-size: 0.8rem; color: #666; margin-bottom: 8px;">
+              Gelernte Züge: ${appState.trainingHistory.filter(h => h.correct).length}
+            </div>
+            <div style="background: #f0f8ff; padding: 4px; border-radius: 4px; margin-top: 4px; font-size: 0.75rem;">
+              🎓 Nur ungelernte Züge werden getestet!
             </div>
           </div>
         ` : ''}
@@ -1077,9 +1140,13 @@ function endTrainingMode() {
   appState.trainingHistory = [];
   
   // Hide training UI elements
-  const trainingIndicator = document.getElementById('trainingModeIndicator');
-  if (trainingIndicator) {
-    trainingIndicator.style.display = 'none';
+  // Training mode indicator was removed
+  
+  // Show save to repertoire switch again
+  const saveSwitch = document.getElementById('saveToRepertoireSwitch');
+  const saveSwitchLabel = saveSwitch?.closest('.switch-label');
+  if (saveSwitchLabel) {
+    saveSwitchLabel.style.display = 'flex';
   }
   
   const feedbackDiv = document.getElementById('trainingFeedback');
@@ -1913,7 +1980,7 @@ function setupEventListeners() {
   if (trainRepertoireBtn) {
     trainRepertoireBtn.addEventListener('click', handleTrainRepertoireClick);
     console.log('🎯 Train Repertoire button handler attached');
-  }
+    }
   // --- END NEW ---
 
   // ====================================================================
@@ -2242,6 +2309,201 @@ async function checkMoveInRepertoire(moveSan) {
   }
 }
 
+/**
+ * Mark a node as studied and propagate learning status
+ */
+async function markNodeAsStudied(nodeId, sessionId) {
+  try {
+    console.log(`🎓 Marking node ${nodeId} as studied in session ${sessionId}`);
+    
+    const response = await fetch('/api/training/mark_studied', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        node_id: nodeId, 
+        session_id: sessionId 
+      })
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      appState.studiedNodes.add(nodeId);
+      console.log(`✅ Node ${nodeId} marked as studied`);
+      return true;
+    } else {
+      console.error(`❌ Failed to mark node as studied:`, data.error);
+      return false;
+    }
+    
+  } catch (error) {
+    console.error('❌ Error marking node as studied:', error);
+    return false;
+  }
+}
+
+/**
+ * Get unstudied moves from current position
+ */
+async function getUnstudiedMoves(sessionId, positionFen) {
+  try {
+    console.log(`📚 Getting unstudied moves for position ${positionFen.substring(0, 30)}...`);
+    
+    const response = await fetch(`/api/training/get_unstudied_moves?session_id=${sessionId}&position_fen=${encodeURIComponent(positionFen)}`);
+    const data = await response.json();
+    
+    if (data.success) {
+      console.log(`✅ Got ${data.moves.length} unstudied moves`);
+      return data.moves;
+    } else {
+      console.error(`❌ Failed to get unstudied moves:`, data.error);
+      return [];
+    }
+    
+  } catch (error) {
+    console.error('❌ Error getting unstudied moves:', error);
+    return [];
+  }
+}
+
+/**
+ * Get learning progress for current session
+ */
+async function getLearningProgress(sessionId) {
+  try {
+    console.log(`📊 Getting learning progress for session ${sessionId}`);
+    
+    const response = await fetch(`/api/training/get_progress?session_id=${sessionId}`);
+    const data = await response.json();
+    
+    if (data.success) {
+      console.log(`✅ Learning progress: ${data.progress.studied_nodes}/${data.progress.total_nodes} nodes studied`);
+      return data.progress;
+    } else {
+      console.error(`❌ Failed to get learning progress:`, data.error);
+      return null;
+    }
+    
+  } catch (error) {
+    console.error('❌ Error getting learning progress:', error);
+    return null;
+  }
+}
+
+/**
+ * Return to start position and reset training state
+ */
+async function returnToStartPosition() {
+  try {
+    console.log('🔄 Returning to start position...');
+    
+    // Show loading feedback
+    showTrainingFeedback('🔄 Lade Startposition...', 'info');
+    
+    // Reload the repertoire tree from start position
+    const response = await fetch(`/api/process_games/My Repertoire?color=${appState.currentColor}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error('Failed to reload start position');
+    }
+    
+    // Reset training state to start position
+    appState.currentPosition = data.position;
+    appState.availableMoves = data.moves || [];
+    appState.currentNodeId = data.node_id || null;
+    
+    // Reset turn to player (always start with player's turn)
+    appState.isOpponentTurn = false;
+    
+    // Re-render board with start position
+    renderChessBoard(data.position, appState.currentColor);
+    showAvailableMovesArrows([]); // No arrows in training mode
+    
+    // Check if all moves from start position are studied
+    const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, data.position);
+    
+    if (unstudiedMoves.length === 0) {
+      // All moves learned - show congratulations!
+      await showCongratulations();
+    } else {
+      // Update training status normally
+      updateTrainingStatus();
+      
+      // Show success feedback
+      showTrainingFeedback('✅ Zurück zur Startposition! Du bist am Zug.', 'success');
+    }
+    
+    console.log('✅ Successfully returned to start position');
+    
+  } catch (error) {
+    console.error('❌ Error returning to start position:', error);
+    showTrainingFeedback('❌ Fehler beim Zurückkehren zur Startposition', 'error');
+  }
+}
+
+/**
+ * Show congratulations when all moves are learned
+ */
+async function showCongratulations() {
+  try {
+    console.log('🎉 Showing congratulations - all moves learned!');
+    
+    // Get final training statistics
+    const learningProgress = await getLearningProgress(appState.trainingSessionId);
+    const correctMoves = appState.trainingHistory.filter(h => h.correct).length;
+    const incorrectMoves = appState.trainingHistory.filter(h => !h.correct).length;
+    
+    // Use correct moves as learned moves (more accurate)
+    const learnedMoves = correctMoves;
+    
+    // Create congratulations message
+    const congratsMessage = `
+      <div style="text-align: center; padding: 20px; color: #333;">
+        <div style="font-size: 1.4rem; margin-bottom: 16px; color: #27ae60; font-weight: 700;">
+          🎉 Herzlichen Glückwunsch! 🎉
+        </div>
+        <div style="font-size: 1.1rem; margin-bottom: 20px; color: #666;">
+          Du hast alle Züge aus deinem Repertoire gelernt!
+        </div>
+        <div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+          <div style="font-size: 1rem; margin-bottom: 8px; font-weight: 600; color: #333;">
+            Training Fortschritt:
+          </div>
+          <div style="font-size: 0.9rem; color: #666; margin-bottom: 4px;">
+            Korrekte Züge: ${correctMoves} | Falsche Züge: ${incorrectMoves}
+          </div>
+          <div style="font-size: 0.9rem; color: #27ae60; font-weight: 600;">
+            Gelernte Züge: ${learnedMoves}
+          </div>
+        </div>
+        <div style="font-size: 0.9rem; color: #666;">
+          🏆 Du bist bereit für dein nächstes Spiel!
+        </div>
+      </div>
+    `;
+    
+    // Update the moves list with congratulations
+    const movesList = document.getElementById('movesList');
+    if (movesList) {
+      movesList.innerHTML = congratsMessage;
+    }
+    
+    // Show congratulations feedback
+    showTrainingFeedback('🎉 Alle Züge gelernt! Herzlichen Glückwunsch!', 'success');
+    
+    console.log('✅ Congratulations displayed successfully');
+    
+  } catch (error) {
+    console.error('❌ Error showing congratulations:', error);
+    showTrainingFeedback('❌ Fehler beim Anzeigen der Gratulation', 'error');
+  }
+}
+
 // Helper: Ensure node_id is set for the current position (fetch if missing)
 async function ensureNodeIdForCurrentPosition() {
   if (appState.currentNodeId) return appState.currentNodeId;
@@ -2332,5 +2594,95 @@ async function sendMoveToBackend(moveSan) {
   } catch (e) {
     console.error('❌ Error sending move to backend:', e);
     return null;
+  }
+}
+
+// ====================================================================
+// 3. API LAYER (Server-Kommunikation)
+// ====================================================================
+
+async function getLearningStats(sessionId) {
+  try {
+    const response = await fetch(`/api/training/get_learning_stats?session_id=${sessionId}`);
+    const data = await response.json();
+    if (data.success) {
+      appState.directlyLearnedNodes = new Set(data.directly_learned_node_ids || []);
+      appState.mistakeCount = data.mistake_count || 0;
+    }
+    return data;
+  } catch (e) {
+    console.error('❌ Error fetching learning stats:', e);
+    return null;
+  }
+}
+
+async function markNodeAsDirectlyLearned(nodeId, sessionId) {
+  const response = await fetch('/api/training/mark_directly_learned', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ node_id: nodeId, session_id: sessionId })
+  });
+  return await response.json();
+}
+
+async function unmarkNodeAsDirectlyLearned(nodeId, sessionId) {
+  const response = await fetch('/api/training/unmark_directly_learned', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ node_id: nodeId, session_id: sessionId })
+  });
+  return await response.json();
+}
+
+async function recordMistake(sessionId) {
+  const response = await fetch('/api/training/record_mistake', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId })
+  });
+  return await response.json();
+}
+
+// ====================================================================
+// 5. TRAINING LOGIC (Korrekte/Falsche Züge)
+// ====================================================================
+
+// Beispiel: Call this when a move is played correctly
+async function handleCorrectMove(nodeId) {
+  const result = await markNodeAsDirectlyLearned(nodeId, appState.trainingSessionId);
+  if (result.success && result.newly_learned) {
+    appState.directlyLearnedNodes.add(nodeId);
+    updateLearningStatsDisplay();
+  }
+  // Wenn result.newly_learned === false: Kein Zähler-Inkrement!
+}
+
+// Beispiel: Call this when a move is played incorrectly
+async function handleMistake(nodeId) {
+  // Fehlerzähler immer erhöhen
+  const result = await recordMistake(appState.trainingSessionId);
+  if (result.success) {
+    appState.mistakeCount = result.mistake_count;
+    updateLearningStatsDisplay();
+  }
+  // Wenn Zug vorher direkt gelernt war, entlernen
+  if (appState.directlyLearnedNodes.has(nodeId)) {
+    const unmarkResult = await unmarkNodeAsDirectlyLearned(nodeId, appState.trainingSessionId);
+    if (unmarkResult.success && unmarkResult.was_learned) {
+      appState.directlyLearnedNodes.delete(nodeId);
+      updateLearningStatsDisplay();
+    }
+  }
+}
+
+// ====================================================================
+// 6. UI-Update für Lernstatistik
+// ====================================================================
+function updateLearningStatsDisplay() {
+  const learned = appState.directlyLearnedNodes.size;
+  const mistakes = appState.mistakeCount;
+  const statsDiv = document.getElementById('learningStats');
+  if (statsDiv) {
+    statsDiv.innerHTML = `<strong>Gelernt:</strong> ${learned} &nbsp; <strong>Fehler:</strong> ${mistakes}`;
   }
 }

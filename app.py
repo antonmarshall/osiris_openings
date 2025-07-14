@@ -1369,3 +1369,182 @@ async def get_node_by_id(request: Request):
         response = {"success": False, "error": str(e), "traceback": tb}
         logger.error(f"[get_node_by_id] Exception: {response}")
         return JSONResponse(response, status_code=400)
+
+# ====================================================================
+# LEARNING STATUS API ENDPOINTS
+# ====================================================================
+
+@app.post("/api/training/mark_studied")
+async def mark_node_studied(request: Request):
+    """Mark a node as studied and propagate status up the tree"""
+    import logging
+    import json
+    import traceback
+    logger = logging.getLogger("api")
+    
+    try:
+        data = await request.json()
+        node_id = data.get("node_id")
+        session_id = data.get("session_id")
+        
+        if not node_id or not session_id:
+            response = {"success": False, "error": "node_id and session_id required"}
+            logger.error(f"[mark_node_studied] {response}")
+            return JSONResponse(response, status_code=400)
+        
+        if not opening_tree:
+            response = {"success": False, "error": "No opening tree loaded"}
+            logger.error(f"[mark_node_studied] {response}")
+            return JSONResponse(response, status_code=500)
+        
+        success = opening_tree.mark_node_as_studied(node_id, session_id)
+        
+        if success:
+            response = {"success": True, "message": f"Node {node_id[:8]} marked as studied"}
+            logger.info(f"[mark_node_studied] {response['message']}")
+        else:
+            response = {"success": False, "error": "Failed to mark node as studied"}
+            logger.error(f"[mark_node_studied] {response}")
+        
+        return JSONResponse(response)
+        
+    except Exception as e:
+        tb = traceback.format_exc()
+        response = {"success": False, "error": str(e), "traceback": tb}
+        logger.error(f"[mark_node_studied] Exception: {response}")
+        return JSONResponse(response, status_code=400)
+
+@app.get("/api/training/get_unstudied_moves")
+async def get_unstudied_moves(session_id: str, position_fen: str):
+    """Get only unstudied moves from current position"""
+    import logging
+    logger = logging.getLogger("api")
+    
+    try:
+        if not opening_tree:
+            response = {"success": False, "error": "No opening tree loaded"}
+            logger.error(f"[get_unstudied_moves] {response}")
+            return JSONResponse(response, status_code=500)
+        
+        result = opening_tree.get_unstudied_moves_from_position(position_fen, session_id)
+        
+        if "error" in result:
+            response = {"success": False, "error": result["error"]}
+            logger.error(f"[get_unstudied_moves] {response}")
+            return JSONResponse(response, status_code=404)
+        
+        response = {"success": True, **result}
+        logger.info(f"[get_unstudied_moves] Returning {len(result.get('moves', []))} unstudied moves")
+        return JSONResponse(response)
+        
+    except Exception as e:
+        response = {"success": False, "error": str(e)}
+        logger.error(f"[get_unstudied_moves] Exception: {response}")
+        return JSONResponse(response, status_code=400)
+
+@app.get("/api/training/get_progress")
+async def get_learning_progress(session_id: str):
+    """Get overall learning progress for the session"""
+    import logging
+    logger = logging.getLogger("api")
+    
+    try:
+        if not opening_tree:
+            response = {"success": False, "error": "No opening tree loaded"}
+            logger.error(f"[get_learning_progress] {response}")
+            return JSONResponse(response, status_code=500)
+        
+        progress = opening_tree.get_learning_progress(session_id)
+        
+        if "error" in progress:
+            response = {"success": False, "error": progress["error"]}
+            logger.error(f"[get_learning_progress] {response}")
+            return JSONResponse(response, status_code=500)
+        
+        response = {"success": True, "progress": progress}
+        logger.info(f"[get_learning_progress] Session {session_id[:8]}: {progress.get('studied_nodes', 0)}/{progress.get('total_nodes', 0)} nodes studied")
+        return JSONResponse(response)
+        
+    except Exception as e:
+        response = {"success": False, "error": str(e)}
+        logger.error(f"[get_learning_progress] Exception: {response}")
+        return JSONResponse(response, status_code=400)
+
+@app.post("/api/training/mark_directly_learned")
+async def mark_directly_learned(request: Request):
+    """Mark a node as directly learned in this session (only if not already marked)."""
+    import logging
+    logger = logging.getLogger("api")
+    try:
+        data = await request.json()
+        node_id = data.get("node_id")
+        session_id = data.get("session_id")
+        if not node_id or not session_id:
+            return JSONResponse({"success": False, "error": "node_id and session_id required"}, status_code=400)
+        node = opening_tree.nodes.get(node_id)
+        if not node:
+            return JSONResponse({"success": False, "error": f"Node {node_id} not found"}, status_code=404)
+        already_learned = node.is_directly_learned(session_id)
+        if not already_learned:
+            node.mark_as_directly_learned(session_id)
+        return JSONResponse({"success": True, "newly_learned": not already_learned})
+    except Exception as e:
+        logger.error(f"[mark_directly_learned] Exception: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/api/training/unmark_directly_learned")
+async def unmark_directly_learned(request: Request):
+    """Unmark a node as directly learned in this session (for mistakes)."""
+    import logging
+    logger = logging.getLogger("api")
+    try:
+        data = await request.json()
+        node_id = data.get("node_id")
+        session_id = data.get("session_id")
+        if not node_id or not session_id:
+            return JSONResponse({"success": False, "error": "node_id and session_id required"}, status_code=400)
+        node = opening_tree.nodes.get(node_id)
+        if not node:
+            return JSONResponse({"success": False, "error": f"Node {node_id} not found"}, status_code=404)
+        was_learned = node.is_directly_learned(session_id)
+        if was_learned:
+            node.unmark_as_directly_learned(session_id)
+        return JSONResponse({"success": True, "was_learned": was_learned})
+    except Exception as e:
+        logger.error(f"[unmark_directly_learned] Exception: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/api/training/record_mistake")
+async def record_mistake(request: Request):
+    """Increment the mistake counter for this session."""
+    import logging
+    logger = logging.getLogger("api")
+    try:
+        data = await request.json()
+        session_id = data.get("session_id")
+        if not session_id:
+            return JSONResponse({"success": False, "error": "session_id required"}, status_code=400)
+        opening_tree.increment_mistake(session_id)
+        return JSONResponse({"success": True, "mistake_count": opening_tree.get_mistake_count(session_id)})
+    except Exception as e:
+        logger.error(f"[record_mistake] Exception: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.get("/api/training/get_learning_stats")
+async def get_learning_stats(session_id: str):
+    """Get directly learned count, mistake count, and node IDs for this session."""
+    import logging
+    logger = logging.getLogger("api")
+    try:
+        directly_learned_count = opening_tree.get_directly_learned_count(session_id)
+        mistake_count = opening_tree.get_mistake_count(session_id)
+        node_ids = opening_tree.get_directly_learned_node_ids(session_id)
+        return JSONResponse({
+            "success": True,
+            "directly_learned_count": directly_learned_count,
+            "mistake_count": mistake_count,
+            "directly_learned_node_ids": node_ids
+        })
+    except Exception as e:
+        logger.error(f"[get_learning_stats] Exception: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)

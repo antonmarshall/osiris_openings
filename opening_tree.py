@@ -3,7 +3,7 @@ import chess
 import chess.pgn
 import os
 from collections import defaultdict, deque
-from typing import Dict, Any, Optional, List, Set, Tuple
+from typing import Dict, Any, Optional, List, Set, Tuple, DefaultDict
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ class Node:
     """
     Knoten im Eröffnungsbaum, der eine Schachstellung und Statistiken repräsentiert.
     """
-    __slots__ = ("id", "fen", "games", "wins", "draws", "losses", "children", "games_info", "move_counts", "elo_diff_sum", "elo_diff_count", "move_dates", "move_san", "parent_fen", "parent_id", "source_files", "is_in_repertoire")
+    __slots__ = ("id", "fen", "games", "wins", "draws", "losses", "children", "games_info", "move_counts", "elo_diff_sum", "elo_diff_count", "move_dates", "move_san", "parent_fen", "parent_id", "source_files", "is_in_repertoire", "studied", "study_session", "directly_learned_sessions")
     
     def __init__(self, fen: str, move_san: Optional[str] = None, parent_fen: Optional[str] = None, parent_id: Optional[str] = None, is_in_repertoire: bool = True):
         self.id = str(uuid.uuid4())
@@ -36,6 +36,11 @@ class Node:
         self.move_dates: Dict[str, List[str]] = {}
         self.source_files: Set[str] = set()
         self.is_in_repertoire = is_in_repertoire
+        # Learning status tracking
+        self.studied = False
+        self.study_session = None
+        # --- NEU: Direkt gelernt pro Session ---
+        self.directly_learned_sessions: Set[str] = set()
 
     def add_child(self, move_uci: str, child_node: 'Node'):
         self.children[move_uci] = child_node
@@ -60,6 +65,31 @@ class Node:
                 elif result_for_player == '1/2':
                     self.draws += 1
             self.games_info.append(game_details) # Store details of the game that led to this state
+
+    # ====================================================================
+    # LEARNING STATUS METHODS
+    # ====================================================================
+    
+    def mark_as_studied(self, session_id: str):
+        """Mark this node as studied in current session"""
+        self.studied = True
+        self.study_session = session_id
+        logger.info(f"[LEARNING] Node {self.id[:8]} marked as studied in session {session_id[:8]}")
+
+    def is_studied(self, session_id: str) -> bool:
+        """Check if node is studied in current session"""
+        return self.studied and self.study_session == session_id
+
+    def get_unstudied_children(self, session_id: str) -> List['Node']:
+        """Get children that are not yet studied"""
+        return [child for child in self.children.values() 
+                if not child.is_studied(session_id)]
+
+    def should_be_studied(self, session_id: str) -> bool:
+        """Check if all children are studied (recursive)"""
+        if not self.children:  # Leaf node - always should be studied
+            return True
+        return all(child.is_studied(session_id) for child in self.children.values())
 
     def get_win_rate(self) -> float:
         # Total games where an outcome (win, loss, draw) was recorded for win rate calculation
@@ -98,7 +128,7 @@ class Node:
         else:
             return "#f44336"    # Red for poor (below 35%)
     
-    def to_dict(self, perspective_color_str: str, include_children: bool = True, max_depth: int = 20, current_depth: int = 0, is_repertoire: bool = False) -> Dict[str, Any]:
+    def to_dict(self, perspective_color_str: str, include_children: bool = True, max_depth: int = 20, current_depth: int = 0, is_repertoire: bool = False, session_id: Optional[str] = None) -> Dict[str, Any]:
         win_rate = self.get_win_rate()
         color = self.get_move_color(is_repertoire)
         result = {
@@ -115,6 +145,11 @@ class Node:
             'color': color,
             'game_info': self.games_info[:10], # Limit game_info for brevity
         }
+        
+        # Add learning status if session_id is provided
+        if session_id is not None:
+            result['studied'] = self.is_studied(session_id)
+            result['should_be_studied'] = self.should_be_studied(session_id)
         # Only include children if requested, within depth limit, and we have children
         if include_children and current_depth < max_depth and self.children:
             result['children'] = {uci: child.to_dict(
@@ -127,6 +162,16 @@ class Node:
         else:
             result['children'] = {}
         return result
+
+    # --- NEU: Direkt gelernt-Logik ---
+    def mark_as_directly_learned(self, session_id: str):
+        self.directly_learned_sessions.add(session_id)
+    
+    def unmark_as_directly_learned(self, session_id: str):
+        self.directly_learned_sessions.discard(session_id)
+    
+    def is_directly_learned(self, session_id: str) -> bool:
+        return session_id in self.directly_learned_sessions
 
 class OpeningTree:
     """
@@ -152,6 +197,8 @@ class OpeningTree:
         logger.info(f"OpeningTree initialized for player: {self.player_name}, perspective: {self.current_perspective_color}. Root FEN: {self.root_fen}")
         # --- NEW: Log all children of root node after init ---
         self.log_root_children("__init__ after tree creation")
+        # --- NEU: Fehlerzähler pro Session ---
+        self.mistake_count_per_session: DefaultDict[str, int] = defaultdict(int)
 
     def log_root_children(self, context=""):
         root = self.nodes_by_fen.get(self._get_node_key(self.root_fen))
@@ -663,3 +710,132 @@ class OpeningTree:
             return int(value) if value else 0
         except (ValueError, TypeError):
             return 0
+    
+    # ====================================================================
+    # LEARNING STATUS METHODS FOR OPENING TREE
+    # ====================================================================
+    
+    def mark_node_as_studied(self, node_id: str, session_id: str) -> bool:
+        """Mark a node as studied and propagate status up the tree"""
+        try:
+            node = self.nodes.get(node_id)
+            if not node:
+                logger.error(f"[LEARNING] Node {node_id} not found")
+                return False
+            
+            # Mark current node as studied
+            node.mark_as_studied(session_id)
+            
+            # Propagate learning status up the tree
+            self._propagate_learning_status(node, session_id)
+            
+            logger.info(f"[LEARNING] Successfully marked node {node_id[:8]} as studied and propagated status")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[LEARNING] Error marking node as studied: {e}")
+            return False
+    
+    def _propagate_learning_status(self, node: Node, session_id: str):
+        """Recursively propagate learning status up the tree"""
+        # Check if parent should also be marked as studied
+        if node.parent_id:
+            parent = self.nodes.get(node.parent_id)
+            if parent and parent.should_be_studied(session_id):
+                parent.mark_as_studied(session_id)
+                logger.info(f"[LEARNING] Propagated to parent {parent.id[:8]} (all children studied)")
+                # Continue propagation up the tree
+                self._propagate_learning_status(parent, session_id)
+    
+    def get_unstudied_moves_from_position(self, fen: str, session_id: str) -> Dict[str, Any]:
+        """Get only unstudied moves from current position"""
+        try:
+            node_key = self._get_node_key(fen)
+            current_node = self.nodes_by_fen.get(node_key)
+            
+            if not current_node:
+                logger.warning(f"[LEARNING] Position not found in tree: {fen[:50]}...")
+                return {"fen": fen, "error": "Position not found", "moves": [], "node_stats": {}}
+            
+            # Get all children that are not studied
+            unstudied_children = current_node.get_unstudied_children(session_id)
+            
+            # Convert to moves format
+            moves_data = []
+            for uci, child in current_node.children.items():
+                if not child.is_studied(session_id):  # Only include unstudied moves
+                    moves_data.append({
+                        'uci': uci,
+                        'san': child.move_san,
+                        'color': child.get_move_color(self.own_repertoir),
+                        'games': child.games,
+                        'wins': child.wins,
+                        'draws': child.draws,
+                        'losses': child.losses,
+                        'win_rate': child.get_win_rate(),
+                        'studied': False
+                    })
+            
+            # Get node stats
+            node_stats = {
+                'id': current_node.id,
+                'games': current_node.games,
+                'wins': current_node.wins,
+                'draws': current_node.draws,
+                'losses': current_node.losses,
+                'win_rate': current_node.get_win_rate(),
+                'studied': current_node.is_studied(session_id),
+                'total_children': len(current_node.children),
+                'unstudied_children': len(unstudied_children)
+            }
+            
+            logger.info(f"[LEARNING] Position {fen[:30]}...: {len(moves_data)} unstudied moves out of {len(current_node.children)} total")
+            
+            return {
+                "fen": fen,
+                "moves": moves_data,
+                "node_stats": node_stats
+            }
+            
+        except Exception as e:
+            logger.error(f"[LEARNING] Error getting unstudied moves: {e}")
+            return {"fen": fen, "error": str(e), "moves": [], "node_stats": {}}
+    
+    def get_learning_progress(self, session_id: str) -> Dict[str, Any]:
+        """Get overall learning progress for the session"""
+        try:
+            # Zähle alle eigenen Repertoire-Züge (Nodes mit is_in_repertoire=True und move_san!=None)
+            repertoire_nodes = [
+                node for node in self.nodes.values()
+                if node.is_in_repertoire and node.move_san is not None
+            ]
+            total_repertoire_moves = len(repertoire_nodes)
+            # Zähle davon die als studied markierten
+            studied_repertoire_moves = sum(
+                1 for node in repertoire_nodes if node.is_studied(session_id)
+            )
+            progress = {
+                'session_id': session_id,
+                'studied_moves': studied_repertoire_moves,
+                'total_moves': total_repertoire_moves,
+                'note': 'Nur eigene Repertoire-Züge werden gezählt (keine Gegnerzüge, keine propagierten Elternknoten ohne eigenen Zug)'
+            }
+            logger.info(f"[LEARNING] Progress for session {session_id[:8]}: {studied_repertoire_moves}/{total_repertoire_moves} eigene Repertoire-Züge gelernt")
+            return progress
+        except Exception as e:
+            logger.error(f"[LEARNING] Error getting learning progress: {e}")
+            return {'error': str(e)}
+
+    # --- NEU: Fehlerzähler-Logik ---
+    def increment_mistake(self, session_id: str):
+        self.mistake_count_per_session[session_id] += 1
+    
+    def get_mistake_count(self, session_id: str) -> int:
+        return self.mistake_count_per_session.get(session_id, 0)
+    
+    # --- NEU: Direkt gelernt Zählung ---
+    def get_directly_learned_count(self, session_id: str) -> int:
+        return sum(1 for node in self.nodes.values() if node.is_in_repertoire and node.move_san is not None and node.is_directly_learned(session_id))
+    
+    def get_directly_learned_node_ids(self, session_id: str) -> List[str]:
+        return [node.id for node in self.nodes.values() if node.is_in_repertoire and node.move_san is not None and node.is_directly_learned(session_id)]
