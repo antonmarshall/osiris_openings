@@ -147,7 +147,7 @@ class Node:
             'game_info': self.games_info[:10], # Limit game_info for brevity
         }
         # --- Logging für Debug: ---
-        logger.info(f"[to_dict] move_san={self.move_san} color={color} is_in_repertoire={self.is_in_repertoire} games={self.games}")
+        # Removed verbose per-move to_dict logging
         
         # Add learning status if session_id is provided
         if session_id is not None:
@@ -206,11 +206,9 @@ class OpeningTree:
     def log_root_children(self, context=""):
         root = self.nodes_by_fen.get(self._get_node_key(self.root_fen))
         if root:
-            logger.info(f"[DEBUG] Root children after {context}:")
-            for uci, child in root.children.items():
-                logger.info(f"    move_san={child.move_san}, uci={uci}, games={child.games}")
+            logger.debug(f"[DEBUG] Root children after {context}: {len(root.children)} children")
         else:
-            logger.info(f"[DEBUG] No root node found after {context}")
+            logger.debug(f"[DEBUG] No root node found after {context}")
 
     def _get_node_key(self, fen: str) -> str:
         """
@@ -341,77 +339,92 @@ class OpeningTree:
         logger.debug(f"[OpeningTree._get_player_perspective] Player: {current_player_name}, Perspective: {perspective_color_str}, Actual Color in Game: {player_actual_color_in_game}, Game Result: {game_result}, Result for Player: {result_for_player}, Skip Stats: {skip_stats}")        
         return player_actual_color_in_game, result_for_player, skip_stats, player_actual_color_in_game, None
 
-    def add_game_to_tree(self, pgn_game: chess.pgn.Game, pgn_file_path: str,
-                         player_actual_color_in_game: str, result_for_player: str, 
-                         skip_stats: bool, game_details: Dict[str, Any],
-                         white_elo: int, black_elo: int):
-        """
-        Adds a single processed game to the opening tree.
-        The game is processed from the perspective of self.player_name playing with self.current_perspective_color.
-        player_actual_color_in_game, result_for_player, skip_stats are pre-determined by _get_player_perspective_color_and_result.
-        """
-        
-        # Determine player's ELO and opponent's ELO for this game
-        player_elo_for_game = black_elo
-        opponent_elo_for_game = white_elo
-
-        # --- CORE LOGIC FIX ---
-        # 1. Start from the board position defined in the PGN (respects FEN headers)
-        game_board = pgn_game.board()
-
-        # Find the starting node in our tree. It must exist.
-        start_node_key = self._get_node_key(game_board.fen())
-        current_node_in_tree = self.nodes_by_fen.get(start_node_key)
-        
-        if current_node_in_tree is None:
-            # This can happen if a PGN starts from a position not yet in the tree
-            # or if the root FEN itself is non-standard.
-            logger.warning(f"Game in {pgn_file_path} starts from a FEN not in tree: {game_board.fen()}. Skipping.")
-            return
-
-        # 2. Iterate through the game, using the game object to handle board state
-        for move in pgn_game.mainline_moves():
-            parent_node_in_tree = current_node_in_tree
-            move_uci = move.uci()
-            
-            # The board is updated by the iteration, so we get the SAN before pushing
-            move_san = game_board.san(move)
-            game_board.push(move) # This advances the game_board's internal state
-
-            # 3. Use the new, correct board state to create/find nodes
-            full_fen_after_move = game_board.fen()
+    def _add_game_node_to_tree_recursive(
+        self, node, board, parent_node_in_tree, pgn_file_path,
+        player_actual_color_in_game, result_for_player, skip_stats, game_details,
+        player_elo_for_game, opponent_elo_for_game
+    ):
+        import logging
+        logger = logging.getLogger("opening_tree")
+        # Only process if not root
+        if node.move is not None:
+            move_uci = node.move.uci()
+            move_san = board.san(node.move)
+            board.push(node.move)
+            full_fen_after_move = board.fen()
             node_key = self._get_node_key(full_fen_after_move)
 
             child_node_obj = self.nodes_by_fen.get(node_key)
             if child_node_obj is None:
-                # Determine if the move is in repertoire based on the current game's perspective
-                # This logic needs to be more sophisticated if repertoire is handled per game
-                # For now, assume if the current game is a repertoire game, all moves are repertoire
-                is_in_repertoire = self.own_repertoir or (player_actual_color_in_game == 'white' and current_node_in_tree.is_in_repertoire) or (player_actual_color_in_game == 'black' and not current_node_in_tree.is_in_repertoire)
-                child_node_obj = Node(full_fen_after_move, move_san=move_san, parent_fen=parent_node_in_tree.fen, parent_id=parent_node_in_tree.id, is_in_repertoire=is_in_repertoire)
+                is_in_repertoire = self.own_repertoir or (
+                    player_actual_color_in_game == 'white' and parent_node_in_tree.is_in_repertoire
+                ) or (
+                    player_actual_color_in_game == 'black' and not parent_node_in_tree.is_in_repertoire
+                )
+                child_node_obj = Node(
+                    full_fen_after_move, move_san=move_san,
+                    parent_fen=parent_node_in_tree.fen, parent_id=parent_node_in_tree.id,
+                    is_in_repertoire=is_in_repertoire
+                )
                 self.nodes[child_node_obj.id] = child_node_obj
                 self.nodes_by_fen[node_key] = child_node_obj
                 logger.info(f"[NODE CREATE] move={move_san} parent={parent_node_in_tree.id[:8]} id={child_node_obj.id[:8]} games={child_node_obj.games} context=add_game_to_tree")
-            
-            parent_node_in_tree.add_child(move_uci, child_node_obj)
-            child_node_obj.increment_game_stats(result_for_player, game_details, skip_stats, self.own_repertoir)
-            
-            # Track source file for this node
-            child_node_obj.source_files.add(pgn_file_path)
-            
-            # Update stats on the parent node for the move made
-            parent_node_in_tree.move_counts[move_uci] = parent_node_in_tree.move_counts.get(move_uci, 0) + 1
-            if not skip_stats:
-                parent_node_in_tree.elo_diff_sum[move_uci] = parent_node_in_tree.elo_diff_sum.get(move_uci, 0) + (player_elo_for_game - opponent_elo_for_game)
-                parent_node_in_tree.elo_diff_count[move_uci] = parent_node_in_tree.elo_diff_count.get(move_uci, 0) + 1
-                parent_node_in_tree.move_dates.setdefault(move_uci, []).append(game_details.get("Datum", "?"))
+            else:
+                # If child node already exists, update its games count and stats
+                child_node_obj.increment_game_stats(result_for_player, game_details, skip_stats, self.own_repertoir)
+                child_node_obj.source_files.add(pgn_file_path)
+                child_node_obj.move_counts[move_uci] = child_node_obj.move_counts.get(move_uci, 0) + 1
+                if not skip_stats:
+                    child_node_obj.elo_diff_sum[move_uci] = child_node_obj.elo_diff_sum.get(move_uci, 0) + (player_elo_for_game - opponent_elo_for_game)
+                    child_node_obj.elo_diff_count[move_uci] = child_node_obj.elo_diff_count.get(move_uci, 0) + 1
+                    child_node_obj.move_dates.setdefault(move_uci, []).append(game_details.get("Datum", "?"))
 
-            # Set the current node for the next iteration
-            current_node_in_tree = child_node_obj
-        
-        # Mark PGN file as processed for this tree instance if needed
+            # Always link the child to the parent in the tree
+            if parent_node_in_tree is not None and child_node_obj is not None:
+                parent_node_in_tree.add_child(move_uci, child_node_obj)
+                logger.debug(f"[TREE-LINK] parent={parent_node_in_tree.id[:8]} move={move_san} child={child_node_obj.id[:8]}")
+
+            logger.debug(f"[PGN-RECURSE] move_san={move_san} fen={full_fen_after_move} parent={parent_node_in_tree.id if parent_node_in_tree else None}")
+            # Set the parent for the next recursion
+            parent_for_next = child_node_obj if child_node_obj is not None else parent_node_in_tree
+        else:
+            # Root node: don't push, parent stays the same
+            parent_for_next = parent_node_in_tree
+
+        # For every variation (mainline and all side branches), recurse with a copy of the board
+        for variation in node.variations:
+            self._add_game_node_to_tree_recursive(
+                variation,
+                board.copy(),  # CRITICAL: use a copy for each branch
+                parent_for_next,
+                pgn_file_path,
+                player_actual_color_in_game,
+                result_for_player,
+                skip_stats,
+                game_details,
+                player_elo_for_game,
+                opponent_elo_for_game
+            )
+
+    def add_game_to_tree(self, pgn_game: chess.pgn.Game, pgn_file_path: str,
+                         player_actual_color_in_game: str, result_for_player: str, 
+                         skip_stats: bool, game_details: Dict[str, Any],
+                         white_elo: int, black_elo: int):
+        player_elo_for_game = black_elo
+        opponent_elo_for_game = white_elo
+        game_board = pgn_game.board()
+        start_node_key = self._get_node_key(game_board.fen())
+        current_node_in_tree = self.nodes_by_fen.get(start_node_key)
+        if current_node_in_tree is None:
+            logger.warning(f"Game in {pgn_file_path} starts from a FEN not in tree: {game_board.fen()}. Skipping.")
+            return
+        # Recursively add all moves and variations
+        self._add_game_node_to_tree_recursive(
+            pgn_game, game_board, current_node_in_tree, pgn_file_path,
+            player_actual_color_in_game, result_for_player, skip_stats, game_details,
+            player_elo_for_game, opponent_elo_for_game
+        )
         self.processed_files.add(pgn_file_path)
-        # At the end of PGN loading, log root children
         self.log_root_children(f"add_game_to_tree from {pgn_file_path}")
 
     def get_tree_data(self, fen: str, perspective_color_str: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -480,7 +493,7 @@ class OpeningTree:
                 is_repertoire=self.own_repertoir
             )
             # --- Logging für Debug: ---
-            logger.info(f"[get_moves_from_position] move_san={move_san} color={child_stats.get('color')} is_in_repertoire={child_stats.get('is_in_repertoire')} games={child_stats.get('games')}")
+            # Removed verbose per-move to_dict logging
             
             color = child_stats.get('color', '#9e9e9e')
 

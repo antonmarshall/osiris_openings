@@ -324,11 +324,11 @@ async def background_download_player(player_name, task_id, limit=200):
 
 # ====== LOGGING HELPERS ======
 def log_section(title, icon="🔷"):
-    logger.info("\n" + "="*60)
-    logger.info(f"{icon} {title} {icon}")
-    logger.info("="*60)
+    # Removed decorative multi-line banners. Use a single concise log line instead.
+    logger.info(f"[STARTUP] {title}")
 
 def log_summary(msg, icon="📊"):
+    # Keep as a single concise summary log.
     logger.info(f"{icon} {msg}")
 
 @app.get("/api/DEPRECATED_startup_logic")
