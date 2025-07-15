@@ -397,48 +397,10 @@ function displayAnalysisResults(data, playerName, color) {
       </div>
     `;
   }
-    // Update moves list
-  const movesList = document.getElementById('movesList');
-  if (movesList && data.moves) {
-    if (data.moves.length === 0) {
-      movesList.innerHTML = '<p style="color: #666; font-style: italic;">No moves available from this position.</p>';
-    } else {      const movesHtml = data.moves.map((move, index) => {
-        // BACKEND-FOKUSSIERT: Use backend-calculated color directly (no frontend calculation)
-        const backendColor = move.color || '#888888'; // Backend provides optimal color
-        return `
-          <div class="move-item" data-move-index="${index}" style="
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center;
-            padding: 8px 12px; 
-            margin: 4px 0;
-            background: ${backendColor}22;
-            border-left: 4px solid ${backendColor};
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-          " onmouseover="this.style.backgroundColor='${backendColor}44'" 
-             onmouseout="this.style.backgroundColor='${backendColor}22'"
-             title="Click to play move | Games: ${move.games} | Wins: ${move.wins} | Draws: ${move.draws} | Losses: ${move.losses}">
-            
-            <div style="font-weight: 600; font-size: 1rem; color: #333;">
-              ${formatMoveDisplay(move)}
-            </div>
-            
-            <div style="display: flex; gap: 12px; align-items: center; font-size: 0.9rem;">
-              <span style="color: #666;">${move.games} games</span>
-              <span style="color: ${backendColor}; font-weight: 600;">${(move.win_rate || 0).toFixed(1)}%</span>
-            </div>
-          </div>
-        `;
-      }).join('');
-      
-      movesList.innerHTML = movesHtml;
-      
-      // --- Add Click Event Listeners to Moves (Schritt 3.2) ---
-      addMoveClickListeners();
-    }
-  }  // Render chess board with current position
+    // Update moves list (centralized)
+  const isOwnRepertoire = ['my repertoire', 'white_repertoir', 'black_repertoir'].includes((playerName || '').toLowerCase());
+  renderMoveList(data.moves || [], { allowDelete: isOwnRepertoire, logSource: 'displayAnalysisResults' });
+    // Render chess board with current position
   renderChessBoard(data.position, color);
     // ✅ NEW: Set up legal moves for click-to-move
   // Update appState first
@@ -1056,20 +1018,8 @@ function showTrainingModeUI() {
     if (movesHeader) {
       movesHeader.textContent = '🎯 Training Status';
     }
-    
-    const movesList = document.getElementById('movesList');
-    if (movesList) {
-      movesList.innerHTML = `
-        <div style="text-align: center; padding: 20px; color: #666;">
-          <div style="font-size: 1.2rem; margin-bottom: 12px;">🎯 Trainingsmodus aktiv</div>
-          <div style="font-size: 0.9rem; margin-bottom: 8px;">Spieler: ${appState.currentColor === 'white' ? 'Weiß' : 'Schwarz'}</div>
-          <div style="font-size: 0.9rem; margin-bottom: 16px;">Status: ${appState.isOpponentTurn ? 'Gegner ist am Zug' : 'Du bist am Zug'}</div>
-          <div style="background: #e8f5e8; padding: 8px; border-radius: 4px; font-size: 0.85rem;">
-            💡 Tipp: Klicke auf die Figuren, um Züge zu machen!
-          </div>
-        </div>
-      `;
-    }
+    // Use central renderMoveList for training mode
+    renderMoveList([], { mode: 'training', logSource: 'showTrainingModeUI' });
   }
   
   console.log('✅ Training mode UI setup complete');
@@ -1083,49 +1033,8 @@ function showTrainingModeUI() {
  */
 async function updateTrainingStatus() {
   if (!appState.trainingMode) return;
-  
-  const movesList = document.getElementById('movesList');
-  if (movesList) {
-    const statusText = appState.isOpponentTurn ? 'Gegner ist am Zug' : 'Du bist am Zug';
-    const statusColor = appState.isOpponentTurn ? '#e67e22' : '#27ae60';
-    
-    // Get learning progress if session is active
-    let learningProgress = null;
-    if (appState.trainingSessionId) {
-      learningProgress = await getLearningProgress(appState.trainingSessionId);
-    }
-    
-    movesList.innerHTML = `
-      <div style="text-align: center; padding: 20px; color: #666;">
-        <div style="font-size: 1.2rem; margin-bottom: 12px;">🎯 Trainingsmodus aktiv</div>
-        <div style="font-size: 0.9rem; margin-bottom: 8px;">Spieler: ${appState.currentColor === 'white' ? 'Weiß' : 'Schwarz'}</div>
-        <div style="font-size: 0.9rem; margin-bottom: 16px; color: ${statusColor}; font-weight: 600;">Status: ${statusText}</div>
-        <div style="background: #e8f5e8; padding: 8px; border-radius: 4px; font-size: 0.85rem;">
-          💡 Tipp: Klicke auf die Figuren, um Züge zu machen!
-        </div>
-        ${appState.trainingHistory.length > 0 ? `
-          <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
-            <div style="font-size: 0.9rem; margin-bottom: 8px; font-weight: 600;">Training Fortschritt:</div>
-            <div style="font-size: 0.8rem; color: #666;">
-              Korrekte Züge: ${appState.trainingHistory.filter(h => h.correct).length} | 
-              Falsche Züge: ${appState.trainingHistory.filter(h => !h.correct).length}
-            </div>
-          </div>
-        ` : ''}
-        ${learningProgress ? `
-          <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee;">
-            <div style="font-size: 0.9rem; margin-bottom: 8px; font-weight: 600;">Lernfortschritt:</div>
-            <div style="font-size: 0.8rem; color: #666; margin-bottom: 8px;">
-              Gelernte Züge: ${appState.trainingHistory.filter(h => h.correct).length}
-            </div>
-            <div style="background: #f0f8ff; padding: 4px; border-radius: 4px; margin-top: 4px; font-size: 0.75rem;">
-              🎓 Nur ungelernte Züge werden getestet!
-            </div>
-          </div>
-        ` : ''}
-      </div>
-    `;
-  }
+  // Use central renderMoveList for training mode status
+  renderMoveList([], { mode: 'training', logSource: 'updateTrainingStatus' });
 }
 
 /**
@@ -1176,11 +1085,8 @@ function endTrainingMode() {
     movesHeader.textContent = 'Available Moves';
   }
   
-  // Clear moves list
-  const movesList = document.getElementById('movesList');
-  if (movesList) {
-    movesList.innerHTML = '';
-  }
+  // Clear moves list using central function
+  renderMoveList([], { logSource: 'endTrainingMode', emptyMessage: 'Bitte wähle einen Spieler und starte die Analyse.' });
   
   // Show end training feedback
   showTrainingFeedback('🏁 Training beendet!', 'info');
@@ -1331,6 +1237,8 @@ async function initializeApp() {
     
     // Set initial orientation based on player color
     appState.boardOrientation = getBoardOrientation(appState.currentColor || 'white');
+    // Initialize move list with central function for UI consistency
+    renderMoveList([], { logSource: 'initializeApp', emptyMessage: 'Bitte wähle einen Spieler und starte die Analyse.' });
     
   } else {
     console.log('❌ App startup failed - Backend not reachable');
@@ -1542,9 +1450,8 @@ async function loadMovesForPosition(fen) {
     });
     const data = await response.json();
     console.log('🔍 Complete moves data from loadMovesForPosition:', data.moves);
-    appState.currentNodeId = data.node_id || null; // Update node id
-    await gotoPosition(fen, data.success ? data.moves : [], appState.currentColor);
-    updateMovesList(appState.availableMoves); // <--- always update move list
+    appState.currentNodeId = data.node_id || null;
+    updatePositionUI(fen, data.moves);
     console.log('✅ Loaded', data.moves?.length || 0, 'moves for new position');
   } catch (error) {
     appState.currentNodeId = null;
@@ -1594,21 +1501,54 @@ function updatePositionStats(stats) {
 }
 
 /**
- * Update moves list display
+ * Central function to render the move list in all modes.
+ * @param {Array} moves - Array of move objects (with san, uci, id, color, etc.)
+ * @param {Object} options - Optional context (e.g. { allowDelete, onDelete, mode, emptyMessage })
  */
-function updateMovesList(moves) {
+function renderMoveList(moves, options = {}) {
   const movesList = document.getElementById('movesList');
+  const logSource = options.logSource || 'unknown';
+  console.log('[renderMoveList] called', {
+    moves,
+    options,
+    logSource,
+    stack: new Error().stack
+  });
   if (!movesList) return;
-  // Backend already filters moves with games > 0, so we can use all moves from backend
-  if (moves.length === 0) {
-    movesList.innerHTML = '<p style="color: #666; font-style: italic;">No more moves available from this position.</p>';
+  // Special modes (training, congratulations, etc.)
+  if (options.mode === 'training') {
+    movesList.innerHTML = `
+      <div style="text-align: center; padding: 20px; color: #666;">
+        <div style="font-size: 1.2rem; margin-bottom: 12px;">🎯 Trainingsmodus aktiv</div>
+        <div style="font-size: 0.9rem; margin-bottom: 8px;">Spieler: ${appState.currentColor === 'white' ? 'Weiß' : 'Schwarz'}</div>
+        <div style="font-size: 0.9rem; margin-bottom: 16px;">Status: ${appState.isOpponentTurn ? 'Gegner ist am Zug' : 'Du bist am Zug'}</div>
+        <div style="background: #e8f5e8; padding: 8px; border-radius: 4px; font-size: 0.85rem;">
+          💡 Tipp: Klicke auf die Figuren, um Züge zu machen!
+        </div>
+      </div>
+    `;
     return;
   }
-    const movesHtml = moves.map((move, index) => {
-    // BACKEND-FOKUSSIERT: Use backend-calculated color directly (no frontend calculation)
-    const backendColor = move.color || '#888888'; // Backend provides optimal color
+  if (options.mode === 'congratulations' && options.congratsMessage) {
+    movesList.innerHTML = options.congratsMessage;
+    return;
+  }
+  // Standard move list rendering
+  if (!moves || moves.length === 0) {
+    movesList.innerHTML = options.emptyMessage || '<p style="color: #666; font-style: italic;">No more moves available from this position.</p>';
+    return;
+  }
+  const isOwnRepertoire = options.allowDelete !== undefined
+    ? options.allowDelete
+    : ['my repertoire', 'white_repertoir', 'black_repertoir'].includes((appState.currentPlayer || '').toLowerCase());
+  const movesHtml = moves.map((move, index) => {
+    const backendColor = move.color || '#888888';
+    let logBadge = '';
+    if (isOwnRepertoire && move.id) {
+      logBadge = `<span style='font-size:0.7em;color:#888;margin-left:2px;'>(${logSource})</span>`;
+    }
     return `
-      <div class="move-item" data-move-index="${index}" style="
+      <div class="move-item" data-move-index="${index}" data-log-id="moveitem-${logSource}-${index}" style="
         display: flex; 
         justify-content: space-between; 
         align-items: center;
@@ -1622,21 +1562,49 @@ function updateMovesList(moves) {
       " onmouseover="this.style.backgroundColor='${backendColor}44'" 
          onmouseout="this.style.backgroundColor='${backendColor}22'"
          title="Click to play move | Games: ${move.games} | Wins: ${move.wins} | Draws: ${move.draws} | Losses: ${move.losses}">
-        
         <div style="font-weight: 600; font-size: 1rem; color: #333;">
           ${formatMoveDisplay(move)}
         </div>
-        
         <div style="display: flex; gap: 12px; align-items: center; font-size: 0.9rem;">
           <span style="color: #666;">${move.games} games</span>
           <span style="color: ${backendColor}; font-weight: 600;">${(move.win_rate || 0).toFixed(1)}%</span>
+          ${isOwnRepertoire && move.id ? `<button class=\"delete-move-btn\" data-node-id=\"${move.id}\" data-log-id=\"deletebtn-${logSource}-${index}\" title=\"Zug löschen\" style=\"margin-left:8px;background:none;border:none;color:#e74c3c;font-size:1.2rem;cursor:pointer;\">🗑️ ${logBadge}</button>` : ''}
         </div>
       </div>
     `;
   }).join('');
   movesList.innerHTML = movesHtml;
-  // Re-add click listeners
   addMoveClickListeners();
+  if (isOwnRepertoire) {
+    document.querySelectorAll('.delete-move-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const nodeId = btn.getAttribute('data-node-id');
+        const moveDiv = btn.closest('.move-item');
+        let moveSan = '';
+        if (moveDiv) {
+          const moveTextDiv = moveDiv.querySelector('div');
+          if (moveTextDiv) moveSan = moveTextDiv.textContent.trim();
+        }
+        if (!nodeId) return;
+        if (!confirm(`Zug \"${moveSan}\" und alle Folgezüge wirklich löschen?`)) return;
+        const res = await fetch('/api/delete_node', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ node_id: nodeId })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showTrainingFeedback(`Zug \"${moveSan}\" gelöscht!`, 'success');
+          await loadMovesForPosition(appState.currentPosition);
+          renderChessBoard(appState.currentPosition, appState.currentColor);
+          showAvailableMovesArrows(appState.availableMoves);
+        } else {
+          showTrainingFeedback('Fehler beim Löschen!', 'error');
+        }
+      };
+    });
+  }
 }
 
 /**
@@ -1673,23 +1641,22 @@ function updateAppStateWithNode(node) {
   if (!node) return;
   console.log('[updateAppStateWithNode] Called with node:', node.id, '| parent_id:', node.parent_id, '| moves:', node.children ? Object.keys(node.children).length : 0);
   appState.currentNodeId = node.id;
-  appState.currentPosition = node.fen;
-  appState.availableMoves = node.children
+  appState.currentNodeParentId = node.parent_id || null;
+  if (node.games !== undefined) appState.games = node.games;
+  if (node.win_rate !== undefined) appState.win_rate = node.win_rate;
+  // Vereinheitlichter UI-Update-Aufruf
+  const moves = node.children
     ? Object.entries(node.children).map(([uci, child]) => ({
         uci: uci,
         san: child.move_san,
         color: child.color,
         games: child.games,
-        win_rate: child.win_rate
+        win_rate: child.win_rate,
+        id: child.id
       }))
     : [];
-  appState.currentNodeParentId = node.parent_id || null;
-  if (node.games !== undefined) appState.games = node.games;
-  if (node.win_rate !== undefined) appState.win_rate = node.win_rate;
-  appState.currentArrows = appState.availableMoves; // <--- Persist arrows
-  renderChessBoard(node.fen, appState.currentColor);
-  updateMovesList(appState.availableMoves);
-  showAvailableMovesArrows(appState.currentArrows); // <--- Use persisted arrows
+  updatePositionUI(node.fen, moves);
+  appState.currentArrows = moves;
   if (typeof window.updateLegalMovesFromBackend === 'function') window.updateLegalMovesFromBackend();
   updateBackButton(!!node.parent_id);
 }
@@ -2395,52 +2362,23 @@ async function getLearningProgress(sessionId) {
 async function returnToStartPosition() {
   try {
     console.log('🔄 Returning to start position...');
-    
-    // Show loading feedback
     showTrainingFeedback('🔄 Lade Startposition...', 'info');
-    
-    // Reload the repertoire tree from start position
     const response = await fetch(`/api/process_games/My Repertoire?color=${appState.currentColor}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
       }
     });
-    
     const data = await response.json();
     if (!data.success) {
       throw new Error('Failed to reload start position');
     }
-    
-    // Reset training state to start position
-    appState.currentPosition = data.position;
-    appState.availableMoves = data.moves || [];
     appState.currentNodeId = data.node_id || null;
-    
-    // Reset turn to player (always start with player's turn)
     appState.isOpponentTurn = false;
-    
-    // Re-render board with start position
-    renderChessBoard(data.position, appState.currentColor);
-    showAvailableMovesArrows([]); // No arrows in training mode
-    
-    // Check if all moves from start position are studied
-    const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, data.position);
-    
-    if (unstudiedMoves.length === 0) {
-      // All moves learned - show congratulations!
-      await showCongratulations();
-    } else {
-      // Update training status normally
-      updateTrainingStatus();
-      
-      // Show success feedback
-      showTrainingFeedback('✅ Zurück zur Startposition! Du bist am Zug.', 'success');
-    }
-    
-    console.log('✅ Successfully returned to start position');
-    
+    updatePositionUI(data.position, data.moves);
+    // ...
   } catch (error) {
+    appState.currentNodeId = null;
     console.error('❌ Error returning to start position:', error);
     showTrainingFeedback('❌ Fehler beim Zurückkehren zur Startposition', 'error');
   }
@@ -2487,11 +2425,8 @@ async function showCongratulations() {
       </div>
     `;
     
-    // Update the moves list with congratulations
-    const movesList = document.getElementById('movesList');
-    if (movesList) {
-      movesList.innerHTML = congratsMessage;
-    }
+    // Use central renderMoveList for congratulations
+    renderMoveList([], { mode: 'congratulations', congratsMessage, logSource: 'showCongratulations' });
     
     // Show congratulations feedback
     showTrainingFeedback('🎉 Alle Züge gelernt! Herzlichen Glückwunsch!', 'success');
@@ -2685,4 +2620,13 @@ function updateLearningStatsDisplay() {
   if (statsDiv) {
     statsDiv.innerHTML = `<strong>Gelernt:</strong> ${learned} &nbsp; <strong>Fehler:</strong> ${mistakes}`;
   }
+}
+
+// Zentrale UI-Update-Funktion für Positionswechsel
+function updatePositionUI(fen, moves) {
+  appState.currentPosition = fen;
+  appState.availableMoves = moves || [];
+  renderMoveList(appState.availableMoves, { logSource: 'updatePositionUI' });
+  renderChessBoard(fen, appState.currentColor);
+  showAvailableMovesArrows(appState.availableMoves);
 }

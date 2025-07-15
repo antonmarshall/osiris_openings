@@ -143,8 +143,11 @@ class Node:
             'losses': self.losses,
             'win_rate': round(win_rate, 2),
             'color': color,
+            'is_in_repertoire': self.is_in_repertoire,  # <--- NEU: Immer mitsenden
             'game_info': self.games_info[:10], # Limit game_info for brevity
         }
+        # --- Logging für Debug: ---
+        logger.info(f"[to_dict] move_san={self.move_san} color={color} is_in_repertoire={self.is_in_repertoire} games={self.games}")
         
         # Add learning status if session_id is provided
         if session_id is not None:
@@ -476,6 +479,8 @@ class OpeningTree:
                 include_children=False, 
                 is_repertoire=self.own_repertoir
             )
+            # --- Logging für Debug: ---
+            logger.info(f"[get_moves_from_position] move_san={move_san} color={child_stats.get('color')} is_in_repertoire={child_stats.get('is_in_repertoire')} games={child_stats.get('games')}")
             
             color = child_stats.get('color', '#9e9e9e')
 
@@ -643,11 +648,22 @@ class OpeningTree:
         # 4. Look for the child node in current_node.children (by UCI)
         child_node = current_node.children.get(move_uci)
         if child_node:
-            return child_node.to_dict(self.current_perspective_color, include_children=True)
+            return child_node.to_dict(self.current_perspective_color, include_children=True, is_repertoire=self.own_repertoir)
         # 5. If not, create the child node, add it to the tree, and return its to_dict(...)
         board.push(move)  # <-- Apply the move before getting the FEN!
         new_fen = board.fen()
-        child_node = Node(new_fen, move_san=move_san, parent_fen=current_node.fen, parent_id=current_node.id, is_in_repertoire=self.own_repertoir)
+        # --- NEU: Einheitliche is_in_repertoire-Logik wie in add_game_to_tree ---
+        color_after_move = 'white' if board.turn else 'black'
+        parent_is_in_repertoire = current_node.is_in_repertoire
+        if self.own_repertoir:
+            is_in_repertoire = True
+        else:
+            if color_after_move == 'white':
+                is_in_repertoire = parent_is_in_repertoire
+            else:
+                is_in_repertoire = not parent_is_in_repertoire
+        logger.info(f"[get_or_create_child_by_id_and_move] move={move_san} parent_is_in_repertoire={parent_is_in_repertoire} color_after_move={color_after_move} is_in_repertoire={is_in_repertoire}")
+        child_node = Node(new_fen, move_san=move_san, parent_fen=current_node.fen, parent_id=current_node.id, is_in_repertoire=is_in_repertoire)
         
         # Set games count based on save switch
         if save_switch_active:
@@ -688,7 +704,7 @@ class OpeningTree:
         current_node.add_child(move_uci, child_node)
         self.nodes[child_node.id] = child_node
         self.nodes_by_fen[self._get_node_key(new_fen)] = child_node
-        return child_node.to_dict(self.current_perspective_color, include_children=True)
+        return child_node.to_dict(self.current_perspective_color, include_children=True, is_repertoire=self.own_repertoir)
     
     def _find_path_to_root(self, current_node):
         """
@@ -839,3 +855,28 @@ class OpeningTree:
     
     def get_directly_learned_node_ids(self, session_id: str) -> List[str]:
         return [node.id for node in self.nodes.values() if node.is_in_repertoire and node.move_san is not None and node.is_directly_learned(session_id)]
+
+    def delete_node_and_subtree(self, node_id: str):
+        """
+        Löscht den Node mit node_id und alle Nachkommen rekursiv aus dem Baum und entfernt die Verbindung zum Parent.
+        """
+        if node_id not in self.nodes:
+            return False  # Node existiert nicht
+        node = self.nodes[node_id]
+        # Zuerst alle Children rekursiv löschen
+        for child in list(node.children.values()):
+            self.delete_node_and_subtree(child.id)
+        # Verbindung zum Parent entfernen
+        if node.parent_id and node.parent_id in self.nodes:
+            parent = self.nodes[node.parent_id]
+            # Finde den Key (UCI) für dieses Child
+            for uci, child_node in list(parent.children.items()):
+                if child_node.id == node_id:
+                    del parent.children[uci]
+                    break
+        # Aus Indexen entfernen
+        if node_id in self.nodes:
+            del self.nodes[node_id]
+        if node.fen in self.nodes_by_fen:
+            del self.nodes_by_fen[node.fen]
+        return True

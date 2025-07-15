@@ -532,7 +532,7 @@ async def process_games(player: str, color: str = 'white'):
     
     # Resolve frontend player name to actual backend player name
     actual_player = resolve_player_name(player, color)
-    logger.info(f"🎯 Looking for player: '{player}' → resolved to: '{actual_player}' with perspective: '{color}'")
+    logger.info(f"[DEBUG] /api/process_games: player={player}, color={color}, actual_player={actual_player}")
     
     player_dir = os.path.join(PGN_BASE_DIR, actual_player, "pgn")
     if not os.path.isdir(player_dir):
@@ -548,6 +548,7 @@ async def process_games(player: str, color: str = 'white'):
             # Only create new tree if player/color is different
             current_player = actual_player
             opening_tree = OpeningTree(player_name=actual_player, initial_perspective_color=color, own_repertoir=(actual_player in REPERTOIRE_PLAYERS))
+            logger.info(f"[DEBUG] OpeningTree created: own_repertoir={opening_tree.own_repertoir}, current_perspective_color={opening_tree.current_perspective_color}")
             logger.info(f"🌳 Neuer OpeningTree erstellt für {actual_player} ({color})")
             
             # Load games using centralized function
@@ -823,13 +824,14 @@ async def api_find_moves(data: dict = Body(...)):
     
     # BUG-FIX: Resolve frontend player name to backend player name
     backend_player = resolve_player_name(player, color)
-    logger.info(f"[api_find_moves] 🔄 Player name mapping: '{player}' → '{backend_player}'")
+    logger.info(f"[DEBUG] /api/find_moves: player={player}, color={color}, backend_player={backend_player}")
     
     log_section(f"API: Find Moves für {backend_player} (from {player}) | FEN: {fen[:30]}...", icon="🟩")
     global opening_tree, current_player
     if opening_tree is None or current_player != backend_player:
         logger.error(f"[api_find_moves] ❌ OpeningTree nicht geladen für '{backend_player}'. Erst /api/process_games/{backend_player} aufrufen.")
         return {"success": False, "moves": [], "stats": {"played": 0, "win_rate": 0.0}, "total_moves_per_year": None, "error": f"OpeningTree not loaded for this player '{backend_player}'. Please load games first."}
+    logger.info(f"[DEBUG] OpeningTree state: own_repertoir={opening_tree.own_repertoir}, current_perspective_color={opening_tree.current_perspective_color}")
     result = opening_tree.get_moves_from_position(fen, color)
     # --- LOG: Children für die angefragte FEN ausgeben ---
     node = opening_tree.nodes_by_fen.get(opening_tree._get_node_key(fen))
@@ -1209,7 +1211,7 @@ async def get_children(request: Request):
     if not node:
         return JSONResponse({"success": False, "error": "Node not found"}, status_code=404)
     # Nur Kinder mit is_in_repertoire=True zurückgeben
-    children = [child.to_dict(include_children=False) for child in node.children.values() if child.is_in_repertoire]
+    children = [child.to_dict(include_children=False, is_repertoire=opening_tree.own_repertoir) for child in node.children.values() if child.is_in_repertoire]
     return JSONResponse({
         "success": True,
         "children": children
@@ -1360,7 +1362,7 @@ async def get_node_by_id(request: Request):
             response = {"success": False, "error": f"Node with id {node_id} not found"}
             logger.error(f"[get_node_by_id] {response}")
             return JSONResponse(response, status_code=404)
-        node_dict = node.to_dict(opening_tree.current_perspective_color, include_children=True)
+        node_dict = node.to_dict(opening_tree.current_perspective_color, include_children=True, is_repertoire=opening_tree.own_repertoir)
         response = {"success": True, "node": node_dict}
         logger.info(f"[get_node_by_id] Returning: {json.dumps(response)[:500]}...")
         return JSONResponse(response)
@@ -1548,3 +1550,15 @@ async def get_learning_stats(session_id: str):
     except Exception as e:
         logger.error(f"[get_learning_stats] Exception: {e}")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/api/delete_node")
+async def delete_node(request: Request):
+    data = await request.json()
+    node_id = data.get("node_id")
+    if not node_id:
+        return JSONResponse({"success": False, "error": "node_id missing"}, status_code=400)
+    # Finde parent_id vor dem Löschen
+    node = opening_tree.nodes.get(node_id)
+    parent_id = node.parent_id if node else None
+    success = opening_tree.delete_node_and_subtree(node_id)
+    return JSONResponse({"success": success, "parent_id": parent_id})
