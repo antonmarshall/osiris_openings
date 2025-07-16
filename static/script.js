@@ -95,7 +95,8 @@ document.addEventListener('DOMContentLoaded', () => {
         below: { key: 'below', color: '#ff9800', opacity: 1.0, lineWidth: 6 },
         poor: { key: 'poor', color: '#f44336', opacity: 1.0, lineWidth: 6 },
         nodata: { key: 'nodata', color: '#9e9e9e', opacity: 1.0, lineWidth: 4 },
-        repertoire: { key: 'repertoire', color: '#4caf50', opacity: 1.0, lineWidth: 8 }
+        repertoire: { key: 'repertoire', color: '#4caf50', opacity: 1.0, lineWidth: 8 },
+        tip: { key: 'tip', color: '#ff9800', opacity: 1.0, lineWidth: 8 }
       },
       events: { draw: onDraw, erase: onErase }
     }
@@ -155,7 +156,8 @@ let appState = {
   studiedNodes: new Set(),   // <--- NEU: Track studied nodes
   unstudiedMovesOnly: true,  // <--- NEU: Filter mode
   directlyLearnedNodes: new Set(), // <--- NEU: Direkt gelernte Züge
-  mistakeCount: 0           // <--- NEU: Fehlerzähler
+  mistakeCount: 0,           // <--- NEU: Fehlerzähler
+  errorCountPerPosition: {} // <--- NEU: Fehlerzähler pro Stellung
 };
 
 // ✅ CRITICAL FIX: Expose appState globally for script-cg.js access
@@ -672,6 +674,9 @@ async function handleTrainingMove(from, to) {
     return; // Not in training mode or not player's turn
   }
 
+  // --- Immer zu Beginn: Alle Pfeile entfernen (auch Tipp-Pfeile) ---
+  showAvailableMovesArrows([], { force: true });
+
   try {
     console.log(`🎯 Training move: ${from} → ${to}`);
 
@@ -697,7 +702,8 @@ async function handleTrainingMove(from, to) {
     const moveExists = await checkMoveInRepertoire(moveSan);
 
     if (moveExists) {
-      // --- NEU: Edge-Case-Logik für bereits gelernte Züge ---
+      // --- Nach korrektem Zug: Fehlerzähler für aktuelle Stellung zurücksetzen ---
+      appState.errorCountPerPosition[appState.currentPosition] = 0;
       // Hole die Node-ID für den gespielten Zug
       const childNode = await sendMoveToBackend(moveSan);
       if (childNode) {
@@ -705,14 +711,15 @@ async function handleTrainingMove(from, to) {
         const alreadyLearned = appState.directlyLearnedNodes.has(childNode.id);
         // Hole alle noch nicht gelernten eigenen Repertoire-Züge
         const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
-        const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false); // Filter für eigene Züge, falls Flag vorhanden
-        if (alreadyLearned && unstudiedOwnMoves.length > 0) {
-          // Freundlicher Hinweis + Button
-          showTrainingFeedback(
-            `✅ Du hast diesen Zug bereits gelernt! Es gibt noch weitere Züge, die du lernen kannst. <button id='showUnlearnedMovesBtn' style='margin-left:12px;padding:4px 10px;font-size:0.95rem;'>zeige offene Züge</button>`,
-            'info'
-          );
-          // Button-Listener für offene Züge
+        const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false);
+        if (alreadyLearned) {
+          let msg = '✅ Der Zug ist in deinem Repertoire, aber du hast ihn bereits gelernt.';
+          if (unstudiedOwnMoves.length > 0) {
+            msg += ' Es gibt noch weitere offene Züge! <button id=\'showUnlearnedMovesBtn\' style=\'margin-left:12px;padding:4px 10px;font-size:0.95rem;\'>zeige offene Züge</button>';
+          } else {
+            msg += ' Alle Züge aus dieser Stellung gelernt!';
+          }
+          showTrainingFeedback(msg, 'info');
           setTimeout(() => {
             const btn = document.getElementById('showUnlearnedMovesBtn');
             if (btn) {
@@ -723,9 +730,6 @@ async function handleTrainingMove(from, to) {
             }
           }, 100);
           return;
-        } else if (alreadyLearned && unstudiedOwnMoves.length === 0) {
-          showTrainingFeedback('🎓 Alle Züge aus dieser Stellung gelernt!', 'success');
-          return;
         }
         // --- Normale Lernlogik, wenn Zug noch nicht gelernt ---
         showTrainingFeedback(`✅ Richtig! ${moveSan} ist in deinem Repertoire!`, 'success');
@@ -734,11 +738,8 @@ async function handleTrainingMove(from, to) {
           move: moveSan,
           correct: true
         });
-        // STEP 4: Mark node as studied if it's a leaf node (no children)
         if (!childNode.children || Object.keys(childNode.children).length === 0) {
-          console.log(`🎓 Leaf node reached - marking as studied`);
-          await markNodeAsStudied(childNode.id, appState.trainingSessionId);
-          // STEP 5: Return to start position after completing a line
+          await markCurrentNodeAsStudiedIfEndOfLine();
           console.log(`🔄 Line completed - returning to start position`);
           showTrainingFeedback('🎓 Linie gelernt! Zurück zur Startposition...', 'success');
           setTimeout(async () => {
@@ -754,6 +755,14 @@ async function handleTrainingMove(from, to) {
       }
     }
     // ❌ NEGATIVE FEEDBACK - Move not in repertoire
+    // --- Fehlerzähler für aktuelle Stellung erhöhen ---
+    const fen = appState.currentPosition;
+    if (!appState.errorCountPerPosition[fen]) {
+      appState.errorCountPerPosition[fen] = 1;
+    } else {
+      appState.errorCountPerPosition[fen] += 1;
+    }
+    const errorCount = appState.errorCountPerPosition[fen];
     showTrainingFeedback(`❌ ${moveSan} ist nicht in deinem Repertoire!`, 'error');
     setTimeout(() => {
       renderChessBoard(appState.currentPosition, appState.currentColor);
@@ -763,12 +772,14 @@ async function handleTrainingMove(from, to) {
       move: moveSan,
       correct: false
     });
-    // --- NEU: Zeige offene Züge nach Fehler ---
-    const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
-    const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false);
-    if (unstudiedOwnMoves.length > 0) {
-      showAvailableMovesArrows(unstudiedOwnMoves);
-      showTrainingFeedback('🏹 Noch offene Züge werden angezeigt!', 'info');
+    // --- Nach dem zweiten oder weiteren Fehlern: Offene Züge als Tipp-Pfeile markieren ---
+    if (errorCount >= 2) {
+      const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+      const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false);
+      if (unstudiedOwnMoves.length > 0) {
+        showAvailableMovesArrows(unstudiedOwnMoves, { force: true, type: 'tip' });
+        showTrainingFeedback('💡 Tipp: Diese Züge sind noch offen!', 'info');
+      }
     }
     updateTrainingStatus();
   } catch (error) {
@@ -784,10 +795,8 @@ async function playOpponentMove() {
   if (!appState.trainingMode || !appState.isOpponentTurn) {
     return;
   }
-  
   try {
     console.log('🤖 Opponent is thinking...');
-    
     // Get unstudied moves from current position
     let availableMoves = [];
     if (appState.trainingSessionId && appState.unstudiedMovesOnly) {
@@ -795,44 +804,56 @@ async function playOpponentMove() {
     } else {
       availableMoves = appState.availableMoves || [];
     }
-    
     if (availableMoves.length === 0) {
-      console.log('🤖 No unstudied moves available - marking current position as studied');
-      
-      // Mark current position as studied if no unstudied moves
-      if (appState.currentNodeId && appState.trainingSessionId) {
-        await markNodeAsStudied(appState.currentNodeId, appState.trainingSessionId);
-      }
-      
+      await markCurrentNodeAsStudiedIfEndOfLine();
       showTrainingFeedback('🎓 Alle Züge aus dieser Position gelernt!', 'success');
-      
-      // Return to start position after a short delay
+      appState.isOpponentTurn = false;
       setTimeout(async () => {
         await returnToStartPosition();
-      }, 2000); // 2 second delay to show completion message
-      
+        const fen = appState.currentPosition;
+        const color = fen.split(' ')[1];
+        appState.isOpponentTurn = (color === 'b');
+        if (appState.isOpponentTurn) {
+          setTimeout(() => playOpponentMove(), 1000);
+        }
+        updateTrainingStatus();
+      }, 2000);
       return;
     }
-    
     // Select random move from unstudied moves
     const randomIndex = Math.floor(Math.random() * availableMoves.length);
     const selectedMove = availableMoves[randomIndex];
-    
     console.log(`🤖 Opponent plays unstudied move: ${selectedMove.san}`);
-    
-    // Show opponent move feedback
     showTrainingFeedback(`🤖 Gegner spielt: ${selectedMove.san}`, 'info');
-    
-    // Play the move
     const childNode = await sendMoveToBackend(selectedMove.san);
     if (childNode) {
       updateAppStateWithNode(childNode);
-      
-      // Player's turn
+      // Nach Gegnerzug prüfen, ob die Linie zu Ende ist
+      let nextMoves = [];
+      if (appState.trainingSessionId && appState.unstudiedMovesOnly) {
+        nextMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+      } else {
+        nextMoves = appState.availableMoves || [];
+      }
+      if (!nextMoves || nextMoves.length === 0) {
+        await markCurrentNodeAsStudiedIfEndOfLine();
+        appState.isOpponentTurn = false;
+        showTrainingFeedback('🎓 Linie abgeschlossen!', 'success');
+        setTimeout(async () => {
+          await returnToStartPosition();
+          const fen = appState.currentPosition;
+          const color = fen.split(' ')[1];
+          appState.isOpponentTurn = (color === 'b');
+          if (appState.isOpponentTurn) {
+            setTimeout(() => playOpponentMove(), 1000);
+          }
+          updateTrainingStatus();
+        }, 2000);
+        return;
+      }
       appState.isOpponentTurn = false;
-      updateTrainingStatus(); // Update status display
+      updateTrainingStatus();
     }
-    
   } catch (error) {
     console.error('❌ Error in opponent move:', error);
     showTrainingFeedback('❌ Fehler beim Gegner-Zug!', 'error');
@@ -2069,59 +2090,47 @@ function setupEventListeners() {
  * Show arrows for all available next moves (using Backend data!)
  * BUG-FIX: Batch arrow addition to prevent timing conflicts
  */
-function showAvailableMovesArrows(moves) {
-  console.log('[showAvailableMovesArrows] Called with', moves ? moves.length : 0, 'moves');
+function showAvailableMovesArrows(moves, options = {}) {
+  const { force = false, type = 'normal' } = options;
+  console.log('[showAvailableMovesArrows] Called with', moves ? moves.length : 0, 'moves', '| options:', options);
   appState.currentArrows = moves || []; // <--- Persist arrows
   clearArrows();
-  
-  // Don't show arrows in training mode
-  if (appState.trainingMode) {
-    console.log('🎯 Training mode - no arrows shown');
+
+  // Nur im Trainingsmodus: Pfeile nur anzeigen, wenn force true (z.B. Tipp-Pfeile)
+  if (appState.trainingMode && !force) {
+    console.log('🎯 Training mode - no arrows shown (except forced/tip arrows)');
     return;
   }
-  
+
   if (!moves || moves.length === 0) {
     console.log('📍 No moves available - no arrows to show');
     return;
   }
-  
-  console.log('🏹 Showing arrows for', moves.length, 'available moves (using backend data)');
-  
-  // BUG-FIX: Wait for board to be ready before adding any arrows
-  if (!isBoardReady()) {
-    console.warn('⚠️ Board not ready for arrows, retrying showAvailableMovesArrows in 200ms...');
-    setTimeout(() => showAvailableMovesArrows(appState.currentArrows), 200); // <--- Use persisted arrows
-    return;
-  }
-  
-  // BUG-FIX: Batch all arrows into a single setShapes call
+
+  // Tipp-Pfeile: Brush "tip" verwenden, sonst Standard-Brush
   const currentShapes = window.cg.state.drawable.shapes || [];
   const newArrows = [];
-  
   moves.forEach((move, index) => {
     const fromSquare = move.uci ? move.uci.substring(0, 2) : null;
     const toSquare = move.uci ? move.uci.substring(2, 4) : null;
-      if (fromSquare && toSquare && isValidSquare(fromSquare) && isValidSquare(toSquare)) {      // Use backend color with frontend brush mapping
-      const backendColor = move.color || '#9e9e9e';
-      const brushName = window.getChessgroundBrush ? 
-        window.getChessgroundBrush(backendColor, appState.currentPlayer === 'My Repertoire') : 
-        'nodata';
-      
-      // Create arrow shape
+    if (fromSquare && toSquare && isValidSquare(fromSquare) && isValidSquare(toSquare)) {
+      let brushName = 'nodata';
+      if (type === 'tip') {
+        brushName = 'tip'; // Tipp-Pfeile
+      } else if (window.getChessgroundBrush) {
+        const backendColor = move.color || '#9e9e9e';
+        brushName = window.getChessgroundBrush(backendColor, appState.currentPlayer === 'My Repertoire');
+      }
       newArrows.push({
         orig: fromSquare,
         dest: toSquare,
         brush: brushName,
         system: true
       });
-      
-      console.log(`[showAvailableMovesArrows] Arrow ${index + 1}: ${fromSquare}→${toSquare} | Color: ${backendColor} | Brush: ${brushName}`);
+      console.log(`[showAvailableMovesArrows] Arrow ${index + 1}: ${fromSquare}→${toSquare} | Brush: ${brushName}`);
     }
   });
-  
-  // BUG-FIX: Add all arrows in one batch operation
   try {
-    // User-Pfeile erhalten, System-Pfeile hinzufügen
     const userShapes = currentShapes.filter(shape => !shape.system);
     window.cg.setShapes([...userShapes, ...newArrows]);
     console.log('[showAvailableMovesArrows] All arrows set');
@@ -2130,7 +2139,11 @@ function showAvailableMovesArrows(moves) {
     console.error('Arrow data:', newArrows);
   }
 }
-window.showAvailableMovesArrows = showAvailableMovesArrows;
+
+// 2. Brush "tip" für Tipp-Pfeile in Chessground-Konfiguration ergänzen
+if (window.cg && window.cg.state && window.cg.state.drawable && window.cg.state.drawable.brushes) {
+  window.cg.state.drawable.brushes.tip = { key: 'tip', color: '#ff9800', opacity: 1.0, lineWidth: 8 };
+}
 
 // ====================================================================
 // DEBUG FUNCTIONS (for testing castling and move processing)
@@ -2629,4 +2642,11 @@ function updatePositionUI(fen, moves) {
   renderMoveList(appState.availableMoves, { logSource: 'updatePositionUI' });
   renderChessBoard(fen, appState.currentColor);
   showAvailableMovesArrows(appState.availableMoves);
+}
+
+// Zentralisierte Hilfsfunktion zum Markieren als 'studied'
+async function markCurrentNodeAsStudiedIfEndOfLine() {
+  if (appState.currentNodeId && appState.trainingSessionId) {
+    await markNodeAsStudied(appState.currentNodeId, appState.trainingSessionId);
+  }
 }

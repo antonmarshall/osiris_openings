@@ -368,6 +368,9 @@ class OpeningTree:
                 )
                 self.nodes[child_node_obj.id] = child_node_obj
                 self.nodes_by_fen[node_key] = child_node_obj
+                # --- FIX: Always set games=1 for every repertoire node (mainline and variations) ---
+                if self.own_repertoir:
+                    child_node_obj.increment_game_stats(result_for_player, game_details, skip_stats, own_repertoir=True)
                 logger.info(f"[NODE CREATE] move={move_san} parent={parent_node_in_tree.id[:8]} id={child_node_obj.id[:8]} games={child_node_obj.games} context=add_game_to_tree")
             else:
                 # If child node already exists, update its games count and stats

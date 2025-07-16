@@ -1194,6 +1194,19 @@ async def get_child_node(request: Request):
         child_node_dict = opening_tree.get_or_create_child_by_id_and_move(node_id, move_san, save_switch_active=save_switch_active)
         response = {"success": True, "child": child_node_dict}
         logger.info(f"[get_child_node] Returning: {json.dumps(response)[:500]}...")
+        # --- Add Tree/API children logging ---
+        fen = child_node_dict.get('fen')
+        node = opening_tree.nodes_by_fen.get(opening_tree._get_node_key(fen))
+        if node and node.children:
+            log_lines = [
+                f"    ├─ {child.move_san or uci:<6} | Games: {child.games:<3} | Win%: {child.get_win_rate():5.1f}"
+                for uci, child in node.children.items()
+            ]
+            logger.info(f"\n[Tree/API] Children für FEN {fen[:30]}...:\n" + "\n".join(log_lines))
+        elif node:
+            logger.info(f"[Tree/API] Keine Children für FEN {fen[:30]}...")
+        else:
+            logger.info(f"[Tree/API] FEN {fen[:30]}... nicht im Tree gefunden.")
         return JSONResponse(response)
     except Exception as e:
         tb = traceback.format_exc()
@@ -1365,6 +1378,19 @@ async def get_node_by_id(request: Request):
         node_dict = node.to_dict(opening_tree.current_perspective_color, include_children=True, is_repertoire=opening_tree.own_repertoir)
         response = {"success": True, "node": node_dict}
         logger.info(f"[get_node_by_id] Returning: {json.dumps(response)[:500]}...")
+        # --- Add Tree/API children logging ---
+        fen = node_dict.get('fen')
+        node_obj = opening_tree.nodes_by_fen.get(opening_tree._get_node_key(fen))
+        if node_obj and node_obj.children:
+            log_lines = [
+                f"    ├─ {child.move_san or uci:<6} | Games: {child.games:<3} | Win%: {child.get_win_rate():5.1f}"
+                for uci, child in node_obj.children.items()
+            ]
+            logger.info(f"\n[Tree/API] Children für FEN {fen[:30]}...:\n" + "\n".join(log_lines))
+        elif node_obj:
+            logger.info(f"[Tree/API] Keine Children für FEN {fen[:30]}...")
+        else:
+            logger.info(f"[Tree/API] FEN {fen[:30]}... nicht im Tree gefunden.")
         return JSONResponse(response)
     except Exception as e:
         tb = traceback.format_exc()
