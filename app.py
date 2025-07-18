@@ -526,7 +526,7 @@ def create_player_directory(player_name: str) -> str:
     return player_dir
 
 @app.get("/api/process_games/{player}")
-async def process_games(player: str, color: str = 'white'):
+async def process_games(player: str, color: str = 'white', session_id: str = None):
     """Verarbeitet die PGNs eines Spielers und gibt die ersten Daten zurück."""
     global current_player, opening_tree
     
@@ -565,7 +565,8 @@ async def process_games(player: str, color: str = 'white'):
                     pgn_text = pgn_text.replace('Â½', '1/2')
                     pgn_texts.append(pgn_text)
         data = opening_tree.get_tree_data(opening_tree.root_fen)
-        moves_data = opening_tree.get_moves_from_position(opening_tree.root_fen, perspective_color_str=color)
+        # NEU: session_id an get_moves_from_position übergeben
+        moves_data = opening_tree.get_moves_from_position(opening_tree.root_fen, perspective_color_str=color, session_id=session_id)
         
         if data is None:
             logger.error(f"❌ Keine Daten für Wurzelknoten ({opening_tree.root_fen}) verfügbar nach PGN-Laden.")
@@ -597,7 +598,7 @@ async def process_games(player: str, color: str = 'white'):
             data["win_rate"] = (total_wins / total_games * 100) if total_games > 0 else 0.0
             logger.info(f"📊 Calculated root statistics from children: {total_games} games, {data['win_rate']:.1f}% win rate")
         
-        logger.info(f"📊 Daten für Wurzelknoten ({opening_tree.root_fen}) abgerufen: Spiele={data.get('games')}, Kinder={len(data.get('children', {}))}")
+        logger.info(f"📊 Daten für Wurzelknoten ({data['fen']}) abgerufen: Spiele={data.get('games')}, Kinder={len(data.get('children', {}))}")
         response_data = {
             "success": True,
             "position": data["fen"],
@@ -1588,3 +1589,12 @@ async def delete_node(request: Request):
     parent_id = node.parent_id if node else None
     success = opening_tree.delete_node_and_subtree(node_id)
     return JSONResponse({"success": success, "parent_id": parent_id})
+
+@app.get("/api/training/root_children_studied")
+async def root_children_studied(session_id: str):
+    """Prüft, ob alle direkten Children des Root-Knotens für die Session als studied markiert sind."""
+    global opening_tree
+    if not opening_tree:
+        return {"success": False, "error": "No opening tree loaded"}
+    result = opening_tree.are_root_children_studied(session_id)
+    return {"success": True, "all_studied": result}

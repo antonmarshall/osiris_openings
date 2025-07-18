@@ -14,7 +14,7 @@ def get_fen_key(board: chess.Board) -> str:
 
 class Node:
     """
-    Knoten im Eröffnungsbaum, der eine Schachstellung und Statistiken repräsentiert.
+    Node in the opening tree representing a chess position and statistics.
     """
     __slots__ = ("id", "fen", "games", "wins", "draws", "losses", "children", "games_info", "move_counts", "elo_diff_sum", "elo_diff_count", "move_dates", "move_san", "parent_fen", "parent_id", "source_files", "is_in_repertoire", "studied", "study_session", "directly_learned_sessions")
     
@@ -47,14 +47,14 @@ class Node:
 
     def increment_game_stats(self, result_for_player: str, game_details: Dict[str, Any], skip_stats: bool = False, own_repertoir: bool = False):
         if own_repertoir:
-            # Für eigenes Repertoire: neutrale Werte setzen
-            self.games = 1  # Immer 1 für Repertoire-Züge
+            # For own repertoire: neutral values
+            self.games = 1  # Always 1 for repertoire moves
             self.wins = 0   # Neutral
             self.draws = 0  # Neutral
             self.losses = 0 # Neutral
-            self.games_info = []  # Leer für Repertoire
+            self.games_info = []  # Empty for repertoire
         else:
-            # Normale Statistik-Logik für Analyse-Spieler
+            # Normal statistics logic for analysis players
             self.games += 1 # This counts games reaching this position.
               # Game-specific outcome stats (wins/draws/losses for the player) are updated based on result_for_player
             if not skip_stats:
@@ -178,8 +178,8 @@ class Node:
 
 class OpeningTree:
     """
-    Analysiert PGN-Dateien eines Spielers und baut einen Baum der Eröffnungen
-    (Stellungen und Züge mit statistischen Erfolgsdaten).
+    Analyzes PGN files of a player and builds a tree of openings
+    (positions and moves with statistical success data).
     """
     def __init__(self, player_name: Optional[str] = None, initial_perspective_color: str = 'white', own_repertoir: bool = False):
         self.root_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -289,27 +289,27 @@ class OpeningTree:
             return False        # Check if player name is present and not empty
         if not normalized_current_player_name:
             logger.debug(f"[OpeningTree._get_player_perspective] No current_player_name provided. Skipping game.")
-            return None, None, True, None, "Kein Spielername angegeben" # Skip if no player context
+            return None, None, True, None, "No player name provided" # Skip if no player context
         
-        # REPERTOIRE LOGIC: Für Repertoire-Spieler (white_repertoir/black_repertoir) 
-        # müssen ALLE Züge akzeptiert werden, da sie beide Farben enthalten
+        # REPERTOIRE LOGIC: For repertoire players (white_repertoir/black_repertoir)
+        # must ALL moves be accepted, as they both contain colors
         if current_player_name in ["white_repertoir", "black_repertoir"]:
-            # Bei Repertoire: Player steht IMMER als Weiß in der PGN (siehe add_opening_lines.py)
-            # Aber das Repertoire enthält Züge für BEIDE Farben aus EINER Perspektive
+            # When repertoire: Player is ALWAYS White in the PGN (see add_opening_lines.py)
+            # But the repertoire contains moves for BOTH colors from ONE perspective
             if name_matches(current_player_variants, white_player):
-                # Repertoire-Spiel gefunden - aber welche Farbe hat der aktuelle Zug?
-                # Das bestimmt sich durch die Board-Position, nicht durch PGN-Header
-                # Für Repertoire: Immer als "white" behandeln (Repertoire-Perspektive)
-                player_actual_color_in_game = 'white'  # Repertoire-Perspektive
-                result_for_player = '*'  # Repertoire hat keine Ergebnisse
-                skip_stats = True  # Keine Statistiken für Repertoire
+                # Repertoire game found - but which color is the current move?
+                # This is determined by the Board-Position, not by PGN-Headers
+                # For repertoire: Always treat as "white" (Repertoire perspective)
+                player_actual_color_in_game = 'white'  # Repertoire perspective
+                result_for_player = '*'  # Repertoire has no results
+                skip_stats = True  # No statistics for repertoire
                 logger.debug(f"[OpeningTree._get_player_perspective] REPERTOIRE: Player {current_player_name} found in game. Processing as repertoire.")
                 return player_actual_color_in_game, result_for_player, skip_stats, player_actual_color_in_game, None
-            else:                # Repertoire-Player nicht in dieser PGN gefunden
+            else:                # Repertoire player not found in this PGN
                 logger.debug(f"[OpeningTree._get_player_perspective] REPERTOIRE: Player {current_player_name} not found in game headers. Skipping.")
-                return None, None, True, None, f"Repertoire-Spieler '{current_player_name}' nicht in PGN gefunden (W: '{white_player}', B: '{black_player}')"
+                return None, None, True, None, f"Repertoire player '{current_player_name}' not found in PGN (W: '{white_player}', B: '{black_player}')"
         
-        # NORMALE ANALYSE-LOGIK: Für echte Spieler (Magnus_Carlsen, etc.)
+        # NORMAL ANALYSIS LOGIC: For real players (Magnus_Carlsen, etc.)
         is_white_perspective = perspective_color_str.lower() == 'white'
         if is_white_perspective:
             # Player is looking for their White games
@@ -320,7 +320,7 @@ class OpeningTree:
                 elif game_result in ["1/2-1/2", "½-½"]: result_for_player = '1/2'
                 else: result_for_player = '*' # Unknown/Ongoing, handled by skip_stats
             else: # Player is not White in this game
-                return None, None, True, None, f"Spieler '{current_player_name}' sucht Weiß-Partien, aber spielt nicht Weiß (W: '{white_player}', B: '{black_player}')"
+                return None, None, True, None, f"Player '{current_player_name}' is looking for White games, but does not play White (W: '{white_player}', B: '{black_player}')"
         else: # Player is looking for their Black games
             if name_matches(current_player_variants, black_player):
                 player_actual_color_in_game = 'black'
@@ -329,12 +329,12 @@ class OpeningTree:
                 elif game_result in ["1/2-1/2", "½-½"]: result_for_player = '1/2'
                 else: result_for_player = '*'
             else: # Player is not Black in this game
-                return None, None, True, None, f"Spieler '{current_player_name}' sucht Schwarz-Partien, aber spielt nicht Schwarz (W: '{white_player}', B: '{black_player}')"
+                return None, None, True, None, f"Player '{current_player_name}' is looking for Black games, but does not play Black (W: '{white_player}', B: '{black_player}')"
 
         if player_actual_color_in_game is None:
              # This case should be covered by the returns above if player not found for the perspective
              logger.debug(f"[OpeningTree._get_player_perspective] Player {current_player_name} (perspective {perspective_color_str}) not found as White ('{white_player}') or Black ('{black_player}'). Game Result: {game_result}. Skipping.")
-             return None, None, True, None, f"Spieler '{current_player_name}' in unbekanntem Zustand nicht gefunden"
+             return None, None, True, None, f"Player '{current_player_name}' in unknown state not found"
 
         logger.debug(f"[OpeningTree._get_player_perspective] Player: {current_player_name}, Perspective: {perspective_color_str}, Actual Color in Game: {player_actual_color_in_game}, Game Result: {game_result}, Result for Player: {result_for_player}, Skip Stats: {skip_stats}")        
         return player_actual_color_in_game, result_for_player, skip_stats, player_actual_color_in_game, None
@@ -356,7 +356,12 @@ class OpeningTree:
 
             child_node_obj = self.nodes_by_fen.get(node_key)
             if child_node_obj is None:
-                is_in_repertoire = self.own_repertoir or (
+                # For repertoire players (training mode), all moves are part of the repertoire to learn
+                if self.own_repertoir:
+                    is_in_repertoire = True
+                else:
+                    # For analysis players, use the original logic
+                    is_in_repertoire = (
                     player_actual_color_in_game == 'white' and parent_node_in_tree.is_in_repertoire
                 ) or (
                     player_actual_color_in_game == 'black' and not parent_node_in_tree.is_in_repertoire
@@ -451,7 +456,7 @@ class OpeningTree:
         logger.warning(f"🔍 Node not found for FEN: {fen[:50]}... (key: {node_key}) in get_tree_data")
         return None
 
-    def get_moves_from_position(self, fen: str, perspective_color_str: Optional[str] = None) -> Dict[str, Any]:
+    def get_moves_from_position(self, fen: str, perspective_color_str: Optional[str] = None, session_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Returns data for the given FEN and all direct child moves.
         Uses the same filtering logic as to_dict() for consistency.
@@ -493,7 +498,8 @@ class OpeningTree:
             child_stats = child_node_obj.to_dict(
                 display_perspective, 
                 include_children=False, 
-                is_repertoire=self.own_repertoir
+                is_repertoire=self.own_repertoir,
+                session_id=session_id
             )
             # --- Logging für Debug: ---
             # Removed verbose per-move to_dict logging
@@ -546,7 +552,9 @@ class OpeningTree:
                 "children_count": len(child_node_obj.children),
                 "color": color,
                 "thickness": thickness,
-                "game_info": child_node_obj.games_info[0] if child_node_obj.games_info else None
+                "game_info": child_node_obj.games_info[0] if child_node_obj.games_info else None,
+                "id": child_node_obj.id,
+                "studied": child_stats.get('studied', None)
             })
         
         # Optionally sort moves, e.g., by number of games or occurrences
@@ -603,17 +611,17 @@ class OpeningTree:
 
     def print_tree(self, max_depth=3, max_children=5):
         """
-        Gibt den OpeningTree im Terminal aus (bis zu max_depth Ebenen, max_children pro Knoten).
-        Zeigt Züge, FEN, Spiele, Winrate, etc. mit Einrückung und jetzt auch die Node-ID.
+        Prints the OpeningTree to the terminal (up to max_depth levels, max_children per node).
+        Shows moves, FEN, games, Winrate, etc. with indentation and now also the Node-ID.
         """
         from collections import deque
         def node_summary(node, move_san=None):
             return f"{move_san or ''} [ID: {node.id[:8]}] [Games: {node.games}, Win%: {node.get_win_rate():.1f}]"
         queue = deque()
-        # Suche Root-Node (kann jetzt nur noch über nodes_by_fen gefunden werden)
+        # Search for Root-Node (can now only be found via nodes_by_fen)
         root = self.nodes_by_fen.get(self._get_node_key(self.root_fen))
         if not root:
-            print("[print_tree] Kein Root-Knoten gefunden.")
+            print("[print_tree] Root node not found.")
             return
         queue.append((root, 0, None))  # (node, depth, move_san)
         while queue:
@@ -622,11 +630,11 @@ class OpeningTree:
             prefix = f"{indent}{'└─' if depth else ''}"
             print(f"{prefix}{node_summary(node, move_san)}")
             if depth < max_depth:
-                # Sortiere Kinder nach Häufigkeit
+                # Sort children by frequency
                 children = sorted(node.children.items(), key=lambda x: x[1].games, reverse=True)
                 for i, (uci, child) in enumerate(children):
                     if i >= max_children:
-                        print(f"{indent}  ... weitere Züge ...")
+                        print(f"{indent}  ... more moves ...")
                         break
                     queue.append((child, depth+1, child.move_san))
 
@@ -724,8 +732,8 @@ class OpeningTree:
     
     def _find_path_to_root(self, current_node):
         """
-        Findet den Pfad von der aktuellen Position zur Wurzel durch Parent-IDs.
-        Returns: Liste von SAN-Zügen von Wurzel zur aktuellen Position.
+        Finds the path from the current position to the root through parent IDs.
+        Returns: List of SAN moves from root to current position.
         """
         path = []
         node = current_node
@@ -734,7 +742,7 @@ class OpeningTree:
             node = self.nodes.get(node.parent_id)
             if node is None:
                 break
-        return path[::-1]  # Umkehren für korrekte Reihenfolge
+        return path[::-1]  # Reverse for correct order
     
     def _safe_int(self, value):
         """Safe integer conversion"""
@@ -836,13 +844,13 @@ class OpeningTree:
     def get_learning_progress(self, session_id: str) -> Dict[str, Any]:
         """Get overall learning progress for the session"""
         try:
-            # Zähle alle eigenen Repertoire-Züge (Nodes mit is_in_repertoire=True und move_san!=None)
+            # Count all own repertoire moves (Nodes with is_in_repertoire=True and move_san!=None)
             repertoire_nodes = [
                 node for node in self.nodes.values()
                 if node.is_in_repertoire and node.move_san is not None
             ]
             total_repertoire_moves = len(repertoire_nodes)
-            # Zähle davon die als studied markierten
+            # Count of those marked as studied
             studied_repertoire_moves = sum(
                 1 for node in repertoire_nodes if node.is_studied(session_id)
             )
@@ -850,9 +858,9 @@ class OpeningTree:
                 'session_id': session_id,
                 'studied_moves': studied_repertoire_moves,
                 'total_moves': total_repertoire_moves,
-                'note': 'Nur eigene Repertoire-Züge werden gezählt (keine Gegnerzüge, keine propagierten Elternknoten ohne eigenen Zug)'
+                'note': 'Only own repertoire moves are counted (no opponent moves, no parent nodes without own moves)'
             }
-            logger.info(f"[LEARNING] Progress for session {session_id[:8]}: {studied_repertoire_moves}/{total_repertoire_moves} eigene Repertoire-Züge gelernt")
+            logger.info(f"[LEARNING] Progress for session {session_id[:8]}: {studied_repertoire_moves}/{total_repertoire_moves} own repertoire moves learned")
             return progress
         except Exception as e:
             logger.error(f"[LEARNING] Error getting learning progress: {e}")
@@ -874,25 +882,32 @@ class OpeningTree:
 
     def delete_node_and_subtree(self, node_id: str):
         """
-        Löscht den Node mit node_id und alle Nachkommen rekursiv aus dem Baum und entfernt die Verbindung zum Parent.
+        Deletes the node with node_id and all its descendants recursively from the tree and removes the connection to the parent.
         """
         if node_id not in self.nodes:
-            return False  # Node existiert nicht
+            return False  # Node does not exist
         node = self.nodes[node_id]
-        # Zuerst alle Children rekursiv löschen
+        # First recursively delete all Children
         for child in list(node.children.values()):
             self.delete_node_and_subtree(child.id)
-        # Verbindung zum Parent entfernen
+        # Remove connection to parent
         if node.parent_id and node.parent_id in self.nodes:
             parent = self.nodes[node.parent_id]
-            # Finde den Key (UCI) für dieses Child
+            # Find the key (UCI) for this Child
             for uci, child_node in list(parent.children.items()):
                 if child_node.id == node_id:
                     del parent.children[uci]
                     break
-        # Aus Indexen entfernen
+        # Remove from indices
         if node_id in self.nodes:
             del self.nodes[node_id]
         if node.fen in self.nodes_by_fen:
             del self.nodes_by_fen[node.fen]
         return True
+
+    def are_root_children_studied(self, session_id: str) -> bool:
+        """Prüft, ob alle direkten Children des Root-Knotens für die Session als studied markiert sind."""
+        root = self.nodes_by_fen.get(self._get_node_key(self.root_fen))
+        if not root or not root.children:
+            return False
+        return all(child.is_studied(session_id) for child in root.children.values())

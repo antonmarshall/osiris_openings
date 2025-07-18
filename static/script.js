@@ -38,15 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       console.log(`⚠️ Piece at ${square} has no legal moves`);
     }
-    // Nach dem Selektieren: Zugpfeile anzeigen
-    if (typeof window.showAvailableMovesArrows === 'function') {
-      window.showAvailableMovesArrows(window.appState.availableMoves || []);
-    }
-    // Always re-apply system arrows after selection
-    if (window.appState && window.appState.currentArrows) {
-      console.log('[onSelect] Reapplying system arrows');
-      window.showAvailableMovesArrows(window.appState.currentArrows);
-    }
+    // Arrow handling is done by the main showAvailableMovesArrows function
+    // No need for duplicate arrow calls here
   }
   function onMove(from, to) {
     console.log(`[onMove] called for move: ${from} → ${to}`);
@@ -66,11 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
       console.log('[DEBUG] cg.set called (move validated fallback):', { fen: game.fen(), lastMove: [from, to], drawable: { ...cg.state.drawable, shapes: cg.state.drawable.shapes } });
       console.log('✅ Move validated by Chess.js (fallback mode)');
     }
-    // Always re-apply system arrows after move
-    if (window.appState && window.appState.currentArrows) {
-      console.log('[onMove] Reapplying system arrows');
-      window.showAvailableMovesArrows(window.appState.currentArrows);
-    }
+    // Arrow handling is done by the main showAvailableMovesArrows function
+    // No need for duplicate arrow calls here
   }
   function onDraw(shape) { annotationStore.set(shape.id, shape); }
   function onErase(shape) { annotationStore.delete(shape.id); }
@@ -160,6 +150,9 @@ let appState = {
   errorCountPerPosition: {} // <--- NEU: Fehlerzähler pro Stellung
 };
 
+// Add to global appState
+appState.trainingCompleted = false;
+
 // ✅ CRITICAL FIX: Expose appState globally for script-cg.js access
 window.appState = appState;
 
@@ -228,7 +221,7 @@ async function afterPositionChange(fen) {
     if (!backToRepBtn) {
       backToRepBtn = document.createElement('button');
       backToRepBtn.id = 'backToRepertoireBtn';
-      backToRepBtn.textContent = 'Zurück zum Repertoire';
+      backToRepBtn.textContent = 'Back to repertoire';
       backToRepBtn.style = 'margin-top:8px;padding:6px 16px;font-size:0.95rem;background:#eee;border-radius:6px;border:1px solid #bbb;cursor:pointer;';
       saveStatus?.parentNode?.appendChild(backToRepBtn);
     }
@@ -304,7 +297,7 @@ async function loadPlayers() {
     // Add default option
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
-    defaultOption.textContent = 'Spieler auswählen...';
+    defaultOption.textContent = 'Select player...';
     select.appendChild(defaultOption);
     
     // Add "My Repertoire" option if repertoire directories exist
@@ -453,7 +446,7 @@ async function handleAnalyzeClick() {
     
     if (!selectedPlayer) {
       console.warn('⚠️ No player selected');
-      alert('Bitte einen Spieler auswählen!');
+      alert('Please select a player!');
       return;
     }
     
@@ -605,61 +598,64 @@ async function handleTrainRepertoireClick() {
 async function startTrainingMode(playerColor) {
   try {
     console.log('🎯 Starting training mode...');
-    
     // Set training mode state
     appState.trainingMode = true;
     appState.currentColor = playerColor;
     appState.currentPlayer = 'My Repertoire';
-    
+    // Generate unique session ID for learning tracking (NEU: VOR Backend-Call!)
+    appState.trainingSessionId = `training_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     // Determine who starts based on player color
     appState.isOpponentTurn = (playerColor === 'black');
-    
     console.log('🎯 Training mode initialized:', {
       playerColor: playerColor,
       isOpponentTurn: appState.isOpponentTurn,
       trainingMode: appState.trainingMode
     });
-    
     // Load the repertoire tree (same as view repertoire)
     console.log('📡 Loading repertoire tree...');
-    const response = await fetch(`/api/process_games/My Repertoire?color=${playerColor}`, {
+    let processGamesUrl = `/api/process_games/My Repertoire?color=${playerColor}`;
+    if (appState.trainingSessionId) {
+      processGamesUrl += `&session_id=${encodeURIComponent(appState.trainingSessionId)}`;
+    }
+    const response = await fetch(processGamesUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
       }
     });
-    
     const data = await response.json();
     if (!data.success) {
       throw new Error('Failed to load repertoire tree');
     }
-    
-    // Generate unique session ID for learning tracking
-    appState.trainingSessionId = `training_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     appState.studiedNodes.clear();
-    
     // Initialize training state
     appState.currentPosition = data.position;
     appState.availableMoves = data.moves || [];
     appState.currentNodeId = data.node_id || null;
     appState.trainingHistory = [];
-    
     // Show training mode UI first (this makes the board visible)
     showTrainingModeUI();
-    
     // Wait a moment for UI to be ready, then render board
     setTimeout(() => {
       renderChessBoard(data.position, playerColor);
       showAvailableMovesArrows([]); // No arrows in training mode
-      
       // If opponent starts, play first move
       if (appState.isOpponentTurn) {
-        setTimeout(() => playOpponentMove(), 1000);
+        // Add timeout protection for opponent move
+        window.trainingTimeout = setTimeout(async () => {
+          try {
+            await playOpponentMove();
+          } catch (error) {
+            console.error('❌ Timeout error in opponent move:', error);
+            appState.isOpponentTurn = false;
+            showTrainingFeedback('Opponent move timeout - your turn', 'error');
+            updateTrainingStatus();
+          }
+        }, 1000);
       }
     }, 100);
-    
     console.log('✅ Training mode started successfully');
-    
+    appState.trainingCompleted = false; // Reset on training start
   } catch (error) {
     console.error('❌ Error starting training mode:', error);
     alert('Fehler beim Starten des Trainingsmodus: ' + error.message);
@@ -670,8 +666,9 @@ async function startTrainingMode(playerColor) {
  * Handle training mode move
  */
 async function handleTrainingMove(from, to) {
-  if (!appState.trainingMode || appState.isOpponentTurn) {
-    return; // Not in training mode or not player's turn
+  if (!appState.trainingMode || appState.isOpponentTurn || appState.trainingCompleted) {
+    console.log('⚠️ Training move ignored: not in training mode, opponent turn, or training completed');
+    return;
   }
 
   // --- Immer zu Beginn: Alle Pfeile entfernen (auch Tipp-Pfeile) ---
@@ -680,6 +677,13 @@ async function handleTrainingMove(from, to) {
   try {
     console.log(`🎯 Training move: ${from} → ${to}`);
 
+    // Validate current state
+    if (!appState.currentPosition || !appState.trainingSessionId) {
+      console.error('❌ Invalid training state - missing position or session');
+      showTrainingFeedback('Training state error - please restart training', 'error');
+      return;
+    }
+
     // Get move SAN using chess.js
     const Chess = window.game.constructor;
     const tempGame = new Chess(appState.currentPosition);
@@ -687,7 +691,7 @@ async function handleTrainingMove(from, to) {
     const found = legalMoves.find(m => m.from === from && m.to === to);
 
     if (!found) {
-      showTrainingFeedback(`❌ ${from}→${to} ist kein legaler Zug!`, 'error');
+      showTrainingFeedback(`${from}→${to} is not a legal move!`, 'error');
       return;
     }
 
@@ -704,14 +708,17 @@ async function handleTrainingMove(from, to) {
     if (moveExists) {
       // --- Nach korrektem Zug: Fehlerzähler für aktuelle Stellung zurücksetzen ---
       appState.errorCountPerPosition[appState.currentPosition] = 0;
+      
       // Hole die Node-ID für den gespielten Zug
       const childNode = await sendMoveToBackend(moveSan);
       if (childNode) {
         updateAppStateWithNode(childNode);
         const alreadyLearned = appState.directlyLearnedNodes.has(childNode.id);
+        
         // Hole alle noch nicht gelernten eigenen Repertoire-Züge
         const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
         const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false);
+        
         if (alreadyLearned) {
           let msg = '✅ Der Zug ist in deinem Repertoire, aber du hast ihn bereits gelernt.';
           if (unstudiedOwnMoves.length > 0) {
@@ -725,35 +732,67 @@ async function handleTrainingMove(from, to) {
             if (btn) {
               btn.onclick = async () => {
                 showAvailableMovesArrows(unstudiedOwnMoves);
-                showTrainingFeedback('🏹 Noch offene Züge werden angezeigt!', 'info');
+                showTrainingFeedback('Unlearned moves are now shown!', 'info');
               };
             }
           }, 100);
           return;
         }
+        
         // --- Normale Lernlogik, wenn Zug noch nicht gelernt ---
-        showTrainingFeedback(`✅ Richtig! ${moveSan} ist in deinem Repertoire!`, 'success');
+        showTrainingFeedback(`Correct! ${moveSan} is in your repertoire!`, 'success');
         appState.trainingHistory.push({
           position: appState.currentPosition,
           move: moveSan,
           correct: true
         });
+        
         if (!childNode.children || Object.keys(childNode.children).length === 0) {
           await markCurrentNodeAsStudiedIfEndOfLine();
           console.log(`🔄 Line completed - returning to start position`);
-          showTrainingFeedback('🎓 Linie gelernt! Zurück zur Startposition...', 'success');
-          setTimeout(async () => {
-            await returnToStartPosition();
+          showTrainingFeedback('Line learned! Returning to start position...', 'success');
+          
+          // Use a more robust timeout with error handling
+          window.trainingTimeout = setTimeout(async () => {
+            try {
+              await returnToStartPosition();
+              await checkIfTrainingComplete();
+            } catch (error) {
+              console.error('❌ Error returning to start position:', error);
+              showTrainingFeedback('Error returning to start - please restart training', 'error');
+            }
           }, 2000);
+          
           updateTrainingStatus();
           return;
         }
+        
         updateTrainingStatus();
         appState.isOpponentTurn = true;
-        setTimeout(() => playOpponentMove(), 1500);
+        
+        // Use a more robust timeout with error handling
+        window.trainingTimeout = setTimeout(async () => {
+          try {
+            await playOpponentMove();
+          } catch (error) {
+            console.error('❌ Error in opponent move timeout:', error);
+            // Recovery: reset turn and show error
+            appState.isOpponentTurn = false;
+            showTrainingFeedback('Opponent move error - your turn again', 'error');
+            updateTrainingStatus();
+          }
+        }, 1500);
+        
+        return;
+      } else {
+        // Recovery: if sendMoveToBackend fails, reset the board and continue
+        console.warn('⚠️ sendMoveToBackend failed, resetting board');
+        renderChessBoard(appState.currentPosition, appState.currentColor);
+        showTrainingFeedback('Move processing error - try again', 'error');
         return;
       }
     }
+    
     // ❌ NEGATIVE FEEDBACK - Move not in repertoire
     // --- Fehlerzähler für aktuelle Stellung erhöhen ---
     const fen = appState.currentPosition;
@@ -763,28 +802,44 @@ async function handleTrainingMove(from, to) {
       appState.errorCountPerPosition[fen] += 1;
     }
     const errorCount = appState.errorCountPerPosition[fen];
-    showTrainingFeedback(`❌ ${moveSan} ist nicht in deinem Repertoire!`, 'error');
+    showTrainingFeedback(`${moveSan} is not in your repertoire!`, 'error');
+    
     setTimeout(() => {
       renderChessBoard(appState.currentPosition, appState.currentColor);
     }, 1000);
+    
     appState.trainingHistory.push({
       position: appState.currentPosition,
       move: moveSan,
       correct: false
     });
+    
     // --- Nach dem zweiten oder weiteren Fehlern: Offene Züge als Tipp-Pfeile markieren ---
     if (errorCount >= 2) {
-      const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
-      const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false);
-      if (unstudiedOwnMoves.length > 0) {
-        showAvailableMovesArrows(unstudiedOwnMoves, { force: true, type: 'tip' });
-        showTrainingFeedback('💡 Tipp: Diese Züge sind noch offen!', 'info');
+      try {
+        const unstudiedMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+        const unstudiedOwnMoves = (unstudiedMoves || []).filter(m => m.is_in_repertoire !== false);
+        if (unstudiedOwnMoves.length > 0) {
+          showAvailableMovesArrows(unstudiedOwnMoves, { force: true, type: 'tip' });
+          showTrainingFeedback('Tip: These moves are still open!', 'info');
+        }
+      } catch (error) {
+        console.error('❌ Error showing tip arrows:', error);
       }
     }
+    
     updateTrainingStatus();
+    
   } catch (error) {
     console.error('❌ Error in training move:', error);
-    showTrainingFeedback('❌ Fehler beim Verarbeiten des Zugs!', 'error');
+    showTrainingFeedback('Error processing move!', 'error');
+    
+    // Recovery: reset board to current position
+    try {
+      renderChessBoard(appState.currentPosition, appState.currentColor);
+    } catch (boardError) {
+      console.error('❌ Error resetting board:', boardError);
+    }
   }
 }
 
@@ -792,71 +847,122 @@ async function handleTrainingMove(from, to) {
  * Play opponent move (random from tree)
  */
 async function playOpponentMove() {
-  if (!appState.trainingMode || !appState.isOpponentTurn) {
+  if (!appState.trainingMode || !appState.isOpponentTurn || appState.trainingCompleted) {
+    console.log('⚠️ Opponent move ignored: not in training mode, not opponent turn, or training completed');
     return;
   }
+  
   try {
     console.log('🤖 Opponent is thinking...');
+    
+    // Validate current state
+    if (!appState.currentPosition || !appState.trainingSessionId) {
+      console.error('❌ Invalid training state for opponent move');
+      appState.isOpponentTurn = false;
+      showTrainingFeedback('Training state error - your turn', 'error');
+      updateTrainingStatus();
+      return;
+    }
+    
     // Get unstudied moves from current position
     let availableMoves = [];
-    if (appState.trainingSessionId && appState.unstudiedMovesOnly) {
-      availableMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
-    } else {
+    try {
+      if (appState.trainingSessionId && appState.unstudiedMovesOnly) {
+        availableMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+      } else {
+        availableMoves = appState.availableMoves || [];
+      }
+    } catch (error) {
+      console.error('❌ Error getting available moves:', error);
+      // Fallback to all available moves
       availableMoves = appState.availableMoves || [];
     }
-    if (availableMoves.length === 0) {
+    
+    if (!availableMoves || availableMoves.length === 0) {
+      console.log('🤖 No moves available - marking as studied and returning to start');
       await markCurrentNodeAsStudiedIfEndOfLine();
-      showTrainingFeedback('🎓 Alle Züge aus dieser Position gelernt!', 'success');
+      showTrainingFeedback('All moves from this position learned!', 'success');
       appState.isOpponentTurn = false;
+      
       setTimeout(async () => {
-        await returnToStartPosition();
-        const fen = appState.currentPosition;
-        const color = fen.split(' ')[1];
-        appState.isOpponentTurn = (color === 'b');
-        if (appState.isOpponentTurn) {
-          setTimeout(() => playOpponentMove(), 1000);
+        try {
+          await returnToStartPosition();
+          await checkIfTrainingComplete();
+        } catch (error) {
+          console.error('❌ Error returning to start position:', error);
+          showTrainingFeedback('Error returning to start - please restart training', 'error');
         }
-        updateTrainingStatus();
       }, 2000);
       return;
     }
+    
     // Select random move from unstudied moves
     const randomIndex = Math.floor(Math.random() * availableMoves.length);
     const selectedMove = availableMoves[randomIndex];
+    
+    if (!selectedMove || !selectedMove.san) {
+      console.error('❌ Invalid selected move:', selectedMove);
+      appState.isOpponentTurn = false;
+      showTrainingFeedback('Opponent move error - your turn', 'error');
+      updateTrainingStatus();
+      return;
+    }
+    
     console.log(`🤖 Opponent plays unstudied move: ${selectedMove.san}`);
-    showTrainingFeedback(`🤖 Gegner spielt: ${selectedMove.san}`, 'info');
+    showTrainingFeedback(`Opponent plays: ${selectedMove.san}`, 'info');
+    
     const childNode = await sendMoveToBackend(selectedMove.san);
     if (childNode) {
       updateAppStateWithNode(childNode);
+      
       // Nach Gegnerzug prüfen, ob die Linie zu Ende ist
       let nextMoves = [];
-      if (appState.trainingSessionId && appState.unstudiedMovesOnly) {
-        nextMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
-      } else {
+      try {
+        if (appState.trainingSessionId && appState.unstudiedMovesOnly) {
+          nextMoves = await getUnstudiedMoves(appState.trainingSessionId, appState.currentPosition);
+        } else {
+          nextMoves = appState.availableMoves || [];
+        }
+      } catch (error) {
+        console.error('❌ Error getting next moves:', error);
         nextMoves = appState.availableMoves || [];
       }
+      
       if (!nextMoves || nextMoves.length === 0) {
+        console.log('🤖 Line completed - no more moves available');
         await markCurrentNodeAsStudiedIfEndOfLine();
         appState.isOpponentTurn = false;
-        showTrainingFeedback('🎓 Linie abgeschlossen!', 'success');
-        setTimeout(async () => {
-          await returnToStartPosition();
-          const fen = appState.currentPosition;
-          const color = fen.split(' ')[1];
-          appState.isOpponentTurn = (color === 'b');
-          if (appState.isOpponentTurn) {
-            setTimeout(() => playOpponentMove(), 1000);
+        showTrainingFeedback('Line completed!', 'success');
+        
+        window.trainingTimeout = setTimeout(async () => {
+          try {
+            await returnToStartPosition();
+            await checkIfTrainingComplete();
+          } catch (error) {
+            console.error('❌ Error returning to start position:', error);
+            showTrainingFeedback('Error returning to start - please restart training', 'error');
           }
-          updateTrainingStatus();
         }, 2000);
         return;
       }
+      
       appState.isOpponentTurn = false;
       updateTrainingStatus();
+    } else {
+      // Recovery: if sendMoveToBackend fails, reset turn
+      console.error('❌ sendMoveToBackend failed for opponent move');
+      appState.isOpponentTurn = false;
+      showTrainingFeedback('Opponent move error - your turn', 'error');
+      updateTrainingStatus();
     }
+    
   } catch (error) {
     console.error('❌ Error in opponent move:', error);
-    showTrainingFeedback('❌ Fehler beim Gegner-Zug!', 'error');
+    showTrainingFeedback('Error in opponent move!', 'error');
+    
+    // Recovery: reset turn and continue
+    appState.isOpponentTurn = false;
+    updateTrainingStatus();
   }
 }
 
@@ -864,87 +970,95 @@ async function playOpponentMove() {
  * Show training feedback message
  */
 function showTrainingFeedback(message, type) {
-  console.log(`🎯 Training feedback [${type}]: ${message}`);
-  console.log(`🎯 Training mode active:`, appState.trainingMode);
-  
-  // Create or get feedback element
-  let feedbackDiv = document.getElementById('trainingFeedback');
-  if (!feedbackDiv) {
-    feedbackDiv = document.createElement('div');
-    feedbackDiv.id = 'trainingFeedback';
-    feedbackDiv.className = 'training-feedback';
-    feedbackDiv.style.cssText = `
+  if (appState.trainingCompleted && type !== 'success') return; // Only allow final congrats
+  // Emoji zentral je nach Typ
+  let emoji = '';
+  switch (type) {
+    case 'success': emoji = '✅ '; break;
+    case 'error': emoji = '❌ '; break;
+    case 'info': emoji = 'ℹ️ '; break;
+    default: emoji = '';
+  }
+  // Feedback-Box dynamisch erzeugen, falls nicht vorhanden
+  let feedbackBox = document.getElementById('trainingFeedbackBox');
+  if (!feedbackBox) {
+    feedbackBox = document.createElement('div');
+    feedbackBox.id = 'trainingFeedbackBox';
+    feedbackBox.setAttribute('role', 'status');
+    feedbackBox.setAttribute('aria-live', 'polite');
+    feedbackBox.style.cssText = `
       position: fixed;
-      top: 20px;
-      right: 20px;
-      padding: 16px 20px;
+      top: 24px;
+      right: 24px;
+      min-width: 260px;
+      max-width: 350px;
+      padding: 16px 20px 16px 20px;
       border-radius: 8px;
       font-weight: 600;
       z-index: 1000;
-      display: none;
-      min-width: 280px;
-      max-width: 350px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      transition: all 0.3s ease;
+      display: none;
+      opacity: 0;
+      transition: opacity 0.4s, transform 0.4s;
+      font-size: 1.08rem;
+      pointer-events: auto;
     `;
-    document.body.appendChild(feedbackDiv);
+    // Close-Button
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.style.cssText = `
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      background: none;
+      border: none;
+      font-size: 1.3rem;
+      color: #888;
+      cursor: pointer;
+      padding: 0;
+    `;
+    closeBtn.onclick = () => {
+      feedbackBox.style.opacity = '0';
+      setTimeout(() => { feedbackBox.style.display = 'none'; }, 400);
+    };
+    feedbackBox.appendChild(closeBtn);
+    document.body.appendChild(feedbackBox);
   }
-  
-  // Set icon and style based on type
-  let icon = '🎯';
-  let backgroundColor = '#f8f9fa';
-  let textColor = '#333';
-  let borderColor = '#e67e22';
-  
-  switch (type) {
-    case 'success':
-      icon = '✅';
-      backgroundColor = '#d5f4e6';
-      textColor = '#1e8449';
-      borderColor = '#27ae60';
-      break;
-    case 'error':
-      icon = '❌';
-      backgroundColor = '#fadbd8';
-      textColor = '#c0392b';
-      borderColor = '#e74c3c';
-      break;
-    case 'info':
-      icon = '🤖';
-      backgroundColor = '#d6eaf8';
-      textColor = '#21618c';
-      borderColor = '#3498db';
-      break;
-  }
-  
-  // Set content with icon
-  feedbackDiv.innerHTML = `
-    <div style="display: flex; align-items: center; gap: 12px;">
-      <span style="font-size: 1.4rem;">${icon}</span>
-      <span style="flex: 1;">${message}</span>
-    </div>
-  `;
-  
-  // Apply styles
-  feedbackDiv.style.background = backgroundColor;
-  feedbackDiv.style.color = textColor;
-  feedbackDiv.style.border = `2px solid ${borderColor}`;
-  
-  // Show with animation
-  feedbackDiv.style.display = 'block';
-  feedbackDiv.style.transform = 'translateX(100%)';
-  setTimeout(() => {
-    feedbackDiv.style.transform = 'translateX(0)';
-  }, 10);
-  
-  // Auto-hide with animation
-  const hideDelay = type === 'info' ? 4000 : 3000;
-  setTimeout(() => {
-    feedbackDiv.style.transform = 'translateX(100%)';
-    setTimeout(() => {
-      feedbackDiv.style.display = 'none';
-    }, 300);
-  }, hideDelay);
+  // Set content
+  feedbackBox.className = 'feedback-' + type;
+  // Remove old message span if present
+  let oldMsg = feedbackBox.querySelector('.feedback-message');
+  if (oldMsg) feedbackBox.removeChild(oldMsg);
+  const msgSpan = document.createElement('span');
+  msgSpan.className = 'feedback-message';
+  msgSpan.textContent = emoji + message;
+  feedbackBox.appendChild(msgSpan);
+  // Farben je nach Typ
+  let bg = '#f8f9fa', color = '#333', border = '#e0e0e0';
+  if (type === 'success') { bg = '#d5f4e6'; color = '#1e8449'; border = '#27ae60'; }
+  if (type === 'error')   { bg = '#fadbd8'; color = '#c0392b'; border = '#e74c3c'; }
+  if (type === 'info')    { bg = '#d6eaf8'; color = '#21618c'; border = '#3498db'; }
+  feedbackBox.style.background = bg;
+  feedbackBox.style.color = color;
+  feedbackBox.style.border = `2px solid ${border}`;
+  // Show with fade-in
+  feedbackBox.style.display = 'block';
+  setTimeout(() => { feedbackBox.style.opacity = '1'; feedbackBox.style.transform = 'translateY(0)'; }, 10);
+  // Auto-hide after 3.5s (unless mouse is over box)
+  let hideTimeout = feedbackBox.hideTimeout;
+  if (hideTimeout) clearTimeout(hideTimeout);
+  feedbackBox.onmouseenter = () => { if (feedbackBox.hideTimeout) clearTimeout(feedbackBox.hideTimeout); };
+  feedbackBox.onmouseleave = () => {
+    feedbackBox.hideTimeout = setTimeout(() => {
+      feedbackBox.style.opacity = '0';
+      setTimeout(() => { feedbackBox.style.display = 'none'; }, 400);
+    }, 2000);
+  };
+  feedbackBox.hideTimeout = setTimeout(() => {
+    feedbackBox.style.opacity = '0';
+    setTimeout(() => { feedbackBox.style.display = 'none'; }, 400);
+  }, 3500);
 }
 
 /**
@@ -994,15 +1108,15 @@ function showTrainingModeUI() {
       position: fixed;
       top: 20px;
       right: 20px;
-      background: #f8f9fa;
-      border: 2px solid #e67e22;
+      padding: 16px 20px;
       border-radius: 8px;
-      padding: 16px;
       font-weight: 600;
       z-index: 1000;
-      max-width: 300px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       display: none;
+      min-width: 280px;
+      max-width: 350px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      transition: all 0.3s ease;
     `;
     document.body.appendChild(feedbackDiv);
   }
@@ -1031,6 +1145,9 @@ function showTrainingModeUI() {
     document.body.appendChild(endTrainingBtn);
   }
   endTrainingBtn.style.display = 'block';
+  
+  // Add reset training button
+  addTrainingResetButton();
   
   // Update moves section for training mode
   const movesSection = document.getElementById('movesSection');
@@ -1089,6 +1206,9 @@ function endTrainingMode() {
     endTrainingBtn.style.display = 'none';
   }
   
+  // Remove reset training button
+  removeTrainingResetButton();
+  
   // Reset analysis results section
   const analysisResults = document.getElementById('analysisResults');
   if (analysisResults) {
@@ -1107,12 +1227,13 @@ function endTrainingMode() {
   }
   
   // Clear moves list using central function
-  renderMoveList([], { logSource: 'endTrainingMode', emptyMessage: 'Bitte wähle einen Spieler und starte die Analyse.' });
+  renderMoveList([], { logSource: 'endTrainingMode', emptyMessage: 'Please select a player and start the analysis.' });
   
   // Show end training feedback
   showTrainingFeedback('🏁 Training beendet!', 'info');
   
   console.log('✅ Training mode ended successfully');
+  appState.trainingCompleted = false; // Reset on training end
 }
 
 // ====================================================================
@@ -1259,7 +1380,7 @@ async function initializeApp() {
     // Set initial orientation based on player color
     appState.boardOrientation = getBoardOrientation(appState.currentColor || 'white');
     // Initialize move list with central function for UI consistency
-    renderMoveList([], { logSource: 'initializeApp', emptyMessage: 'Bitte wähle einen Spieler und starte die Analyse.' });
+    renderMoveList([], { logSource: 'initializeApp', emptyMessage: 'Please select a player and start the analysis.' });
     
   } else {
     console.log('❌ App startup failed - Backend not reachable');
@@ -1529,13 +1650,11 @@ function updatePositionStats(stats) {
 function renderMoveList(moves, options = {}) {
   const movesList = document.getElementById('movesList');
   const logSource = options.logSource || 'unknown';
-  console.log('[renderMoveList] called', {
-    moves,
-    options,
-    logSource,
-    stack: new Error().stack
-  });
+  console.trace('[renderMoveList] called', { moves, options, logSource });
   if (!movesList) return;
+  // DEBUG: Wenn Startposition, Move-List blau hinterlegen
+  const isStartPosition = (appState.currentPosition === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  movesList.style.background = isStartPosition ? '#cce4ff' : '';
   // Special modes (training, congratulations, etc.)
   if (options.mode === 'training') {
     movesList.innerHTML = `
@@ -1562,7 +1681,7 @@ function renderMoveList(moves, options = {}) {
   const isOwnRepertoire = options.allowDelete !== undefined
     ? options.allowDelete
     : ['my repertoire', 'white_repertoir', 'black_repertoir'].includes((appState.currentPlayer || '').toLowerCase());
-  const movesHtml = moves.map((move, index) => {
+    const movesHtml = moves.map((move, index) => {
     const backendColor = move.color || '#888888';
     let logBadge = '';
     if (isOwnRepertoire && move.id) {
@@ -2095,40 +2214,42 @@ function showAvailableMovesArrows(moves, options = {}) {
   console.log('[showAvailableMovesArrows] Called with', moves ? moves.length : 0, 'moves', '| options:', options);
   appState.currentArrows = moves || []; // <--- Persist arrows
   clearArrows();
-
+  
   // Nur im Trainingsmodus: Pfeile nur anzeigen, wenn force true (z.B. Tipp-Pfeile)
   if (appState.trainingMode && !force) {
     console.log('🎯 Training mode - no arrows shown (except forced/tip arrows)');
     return;
   }
-
+  
   if (!moves || moves.length === 0) {
     console.log('📍 No moves available - no arrows to show');
     return;
   }
-
+  
   // Tipp-Pfeile: Brush "tip" verwenden, sonst Standard-Brush
   const currentShapes = window.cg.state.drawable.shapes || [];
   const newArrows = [];
   moves.forEach((move, index) => {
     const fromSquare = move.uci ? move.uci.substring(0, 2) : null;
     const toSquare = move.uci ? move.uci.substring(2, 4) : null;
-    if (fromSquare && toSquare && isValidSquare(fromSquare) && isValidSquare(toSquare)) {
-      let brushName = 'nodata';
-      if (type === 'tip') {
-        brushName = 'tip'; // Tipp-Pfeile
-      } else if (window.getChessgroundBrush) {
-        const backendColor = move.color || '#9e9e9e';
-        brushName = window.getChessgroundBrush(backendColor, appState.currentPlayer === 'My Repertoire');
-      }
-      newArrows.push({
-        orig: fromSquare,
-        dest: toSquare,
-        brush: brushName,
-        system: true
-      });
-      console.log(`[showAvailableMovesArrows] Arrow ${index + 1}: ${fromSquare}→${toSquare} | Brush: ${brushName}`);
+    if (!fromSquare || !toSquare || !isValidSquare(fromSquare) || !isValidSquare(toSquare)) {
+      // Skip invalid moves
+      return;
     }
+    let brushName = 'nodata';
+    if (type === 'tip') {
+      brushName = 'tip'; // Tipp-Pfeile
+    } else if (window.getChessgroundBrush) {
+      const backendColor = move.color || '#9e9e9e';
+      brushName = window.getChessgroundBrush(backendColor, appState.currentPlayer === 'My Repertoire');
+    }
+    newArrows.push({
+      orig: fromSquare,
+      dest: toSquare,
+      brush: brushName,
+      system: true
+    });
+    console.log(`[showAvailableMovesArrows] Arrow ${index + 1}: ${fromSquare}→${toSquare} | Brush: ${brushName}`);
   });
   try {
     const userShapes = currentShapes.filter(shape => !shape.system);
@@ -2357,7 +2478,7 @@ async function getLearningProgress(sessionId) {
     
     if (data.success) {
       console.log(`✅ Learning progress: ${data.progress.studied_nodes}/${data.progress.total_nodes} nodes studied`);
-      return data.progress;
+      return data;
     } else {
       console.error(`❌ Failed to get learning progress:`, data.error);
       return null;
@@ -2387,8 +2508,21 @@ async function returnToStartPosition() {
       throw new Error('Failed to reload start position');
     }
     appState.currentNodeId = data.node_id || null;
-    appState.isOpponentTurn = false;
-    updatePositionUI(data.position, data.moves);
+    // --- FIX: Set correct turn after reset in training mode ---
+    if (appState.trainingMode) {
+      if (appState.currentColor === 'black') {
+        appState.isOpponentTurn = true;
+        updatePositionUI(data.position, data.moves);
+        setTimeout(() => playOpponentMove(), 500); // Let UI update, then play opponent
+      } else {
+        appState.isOpponentTurn = false;
+        updatePositionUI(data.position, data.moves);
+      }
+    } else {
+      appState.isOpponentTurn = false;
+      updatePositionUI(data.position, data.moves);
+    }
+    await checkIfTrainingComplete();
     // ...
   } catch (error) {
     appState.currentNodeId = null;
@@ -2402,53 +2536,45 @@ async function returnToStartPosition() {
  */
 async function showCongratulations() {
   try {
-    console.log('🎉 Showing congratulations - all moves learned!');
-    
+    console.log('Showing congratulations - all moves learned!');
     // Get final training statistics
     const learningProgress = await getLearningProgress(appState.trainingSessionId);
     const correctMoves = appState.trainingHistory.filter(h => h.correct).length;
     const incorrectMoves = appState.trainingHistory.filter(h => !h.correct).length;
-    
     // Use correct moves as learned moves (more accurate)
     const learnedMoves = correctMoves;
-    
-    // Create congratulations message
+    // Create congratulations message (ENGLISH, NO EMOJIS)
     const congratsMessage = `
       <div style="text-align: center; padding: 20px; color: #333;">
         <div style="font-size: 1.4rem; margin-bottom: 16px; color: #27ae60; font-weight: 700;">
-          🎉 Herzlichen Glückwunsch! 🎉
+          Congratulations!
         </div>
         <div style="font-size: 1.1rem; margin-bottom: 20px; color: #666;">
-          Du hast alle Züge aus deinem Repertoire gelernt!
+          You have learned all moves from your repertoire!
         </div>
         <div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
           <div style="font-size: 1rem; margin-bottom: 8px; font-weight: 600; color: #333;">
-            Training Fortschritt:
+            Training Progress:
           </div>
           <div style="font-size: 0.9rem; color: #666; margin-bottom: 4px;">
-            Korrekte Züge: ${correctMoves} | Falsche Züge: ${incorrectMoves}
+            Correct moves: ${correctMoves} | Mistakes: ${incorrectMoves}
           </div>
           <div style="font-size: 0.9rem; color: #27ae60; font-weight: 600;">
-            Gelernte Züge: ${learnedMoves}
+            Learned moves: ${learnedMoves}
           </div>
         </div>
         <div style="font-size: 0.9rem; color: #666;">
-          🏆 Du bist bereit für dein nächstes Spiel!
+          You are ready for your next game!
         </div>
       </div>
     `;
-    
     // Use central renderMoveList for congratulations
     renderMoveList([], { mode: 'congratulations', congratsMessage, logSource: 'showCongratulations' });
-    
-    // Show congratulations feedback
-    showTrainingFeedback('🎉 Alle Züge gelernt! Herzlichen Glückwunsch!', 'success');
-    
-    console.log('✅ Congratulations displayed successfully');
-    
+    // Show congratulations feedback (ENGLISH, NO EMOJIS)
+    showTrainingFeedback('All moves learned! Congratulations!', 'success');
+    console.log('Congratulations message shown.');
   } catch (error) {
-    console.error('❌ Error showing congratulations:', error);
-    showTrainingFeedback('❌ Fehler beim Anzeigen der Gratulation', 'error');
+    console.error('Error showing congratulations:', error);
   }
 }
 
@@ -2639,7 +2765,9 @@ function updateLearningStatsDisplay() {
 function updatePositionUI(fen, moves) {
   appState.currentPosition = fen;
   appState.availableMoves = moves || [];
-  renderMoveList(appState.availableMoves, { logSource: 'updatePositionUI' });
+  if (!appState.trainingMode) {
+    renderMoveList(appState.availableMoves, { logSource: 'updatePositionUI' });
+  }
   renderChessBoard(fen, appState.currentColor);
   showAvailableMovesArrows(appState.availableMoves);
 }
@@ -2648,5 +2776,273 @@ function updatePositionUI(fen, moves) {
 async function markCurrentNodeAsStudiedIfEndOfLine() {
   if (appState.currentNodeId && appState.trainingSessionId) {
     await markNodeAsStudied(appState.currentNodeId, appState.trainingSessionId);
+  }
+}
+
+// 1. Zentrale Funktion zum Trainingsende-Check
+async function checkIfTrainingComplete() {
+  try {
+    // NEU: Nur noch zentrale Backend-Logik nutzen
+    if (appState.trainingMode && appState.currentPosition === CONFIG.DEFAULT_FEN) {
+      // Backend-Endpoint abfragen
+      const response = await fetch(`/api/training/root_children_studied?session_id=${encodeURIComponent(appState.trainingSessionId)}`);
+      const data = await response.json();
+      if (data.success && data.all_studied) {
+        appState.trainingCompleted = true;
+        showTrainingFeedback('All moves learned! Congratulations!', 'success');
+        if (typeof showCongratulations === 'function') {
+          setTimeout(() => showCongratulations(), 1000);
+        }
+        return true;
+      }
+      return false;
+    }
+    // Fallback: bisherige Logik für andere Fälle
+    const progress = await getLearningProgress(appState.trainingSessionId);
+    if (progress && progress.success && progress.progress) {
+      const { studied_nodes, total_nodes } = progress.progress;
+      console.log(`🎯 Training progress: ${studied_nodes}/${total_nodes} nodes learned`);
+      if (studied_nodes >= total_nodes && total_nodes > 0) {
+        appState.trainingCompleted = true;
+        showTrainingFeedback('All moves learned! Congratulations!', 'success');
+        if (typeof showCongratulations === 'function') {
+          setTimeout(() => showCongratulations(), 1000);
+        }
+        return true;
+      }
+    } else {
+      console.warn('⚠️ Could not get learning progress, falling back to starting position check');
+      const unstudied = await getUnstudiedMoves(appState.trainingSessionId, CONFIG.DEFAULT_FEN);
+      if (!unstudied || unstudied.length === 0) {
+        appState.trainingCompleted = true;
+        showTrainingFeedback('All moves learned! Congratulations!', 'success');
+        if (typeof showCongratulations === 'function') {
+          setTimeout(() => showCongratulations(), 1000);
+        }
+        return true;
+      }
+    }
+    return false;
+  } catch (error) {
+    console.error('❌ Error checking training completion:', error);
+    return false;
+  }
+}
+
+// --- NEW CLEAN INITIALIZATION LOGIC ---
+
+/**
+ * Initialize all UI elements to their default state (dropdowns, buttons, etc.)
+ */
+function initializeUI() {
+  // Example: Reset dropdowns, disable buttons, clear status messages
+  const playerSelect = document.getElementById('playerSelect');
+  if (playerSelect) playerSelect.selectedIndex = 0;
+  setLoadingState(false);
+  resetBoardUI();
+  // Hide analysis/results sections if needed
+  const resultsSection = document.getElementById('analysisResults');
+  if (resultsSection) resultsSection.style.display = 'none';
+}
+
+/**
+ * Set up the chessboard with a given FEN and orientation, no arrows or moves yet
+ */
+function setupBoard(fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', orientation = 'white') {
+  if (typeof window.cg !== 'undefined') {
+    window.cg.set({
+      fen: fen,
+      orientation: orientation,
+      drawable: { ...window.cg.state.drawable, shapes: [] },
+      movable: { ...window.cg.state.movable, dests: new Map() }
+    });
+  }
+}
+
+/**
+ * Reset board, move list, and arrows to empty state
+ */
+function resetBoardUI() {
+  setupBoard(); // Default FEN, no arrows
+  // Clear move list
+  const movesList = document.getElementById('movesList');
+  if (movesList) movesList.innerHTML = '';
+  // Clear status
+  const saveStatus = document.getElementById('saveStatus');
+  if (saveStatus) saveStatus.textContent = '';
+}
+
+/**
+ * Set loading state for the UI (disable/enable buttons, show/hide spinner)
+ */
+function setLoadingState(isLoading) {
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  if (analyzeBtn) analyzeBtn.disabled = isLoading;
+  const downloadPlayer = document.getElementById('downloadPlayer');
+  if (downloadPlayer) downloadPlayer.disabled = isLoading;
+  // Optionally show/hide a spinner or overlay
+  // ...
+}
+
+// --- END NEW CLEAN INITIALIZATION LOGIC ---
+
+/**
+ * Fetch analysis data (FEN, moves, stats) for a player and color from the backend
+ */
+async function fetchAnalysis(player, color) {
+  try {
+    setLoadingState(true);
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player, color })
+    });
+    const data = await response.json();
+    setLoadingState(false);
+    return data;
+  } catch (error) {
+    setLoadingState(false);
+    console.error('❌ Error fetching analysis:', error);
+    return { success: false, error };
+  }
+}
+
+/**
+ * Apply analysis data: set state, render board, move list, and arrows in correct order
+ */
+function applyAnalysisData(data) {
+  if (!data || !data.success) {
+    // Show error in UI
+    const saveStatus = document.getElementById('saveStatus');
+    if (saveStatus) saveStatus.textContent = '❌ Error loading analysis data.';
+    return;
+  }
+  // 1. Set state
+  appState.currentPlayer = data.player;
+  appState.currentColor = data.color;
+  appState.currentPosition = data.position;
+  appState.availableMoves = data.moves || [];
+
+  // 2. Render board
+  setupBoard(data.position, data.color);
+
+  // 3. Set legal moves for Chessground
+  if (typeof setLegalMoves === 'function') setLegalMoves(data.moves);
+
+  // 4. Render move list (jetzt mit allowDelete für eigenes Repertoire)
+  const isOwnRepertoire = ['my repertoire', 'white_repertoir', 'black_repertoir'].includes((data.player || '').toLowerCase());
+  renderMoveList(data.moves, { allowDelete: isOwnRepertoire, logSource: "applyAnalysisData" });
+
+  // 5. Draw arrows
+  if (typeof drawArrows === 'function') drawArrows(data.moves);
+
+  // Show analysis/results section
+  const resultsSection = document.getElementById('analysisResults');
+  if (resultsSection) resultsSection.style.display = 'block';
+}
+
+// --- Placeholders for setLegalMoves, renderMoveList, drawArrows ---
+function setLegalMoves(moves) {
+  if (typeof window.cg === 'undefined') return;
+  let dests = new Map();
+  (moves || []).forEach(move => {
+    if (move.uci && move.uci.length >= 4) {
+      const from = move.uci.substring(0, 2);
+      const to = move.uci.substring(2, 4);
+      if (!dests.has(from)) dests.set(from, []);
+      dests.get(from).push(to);
+    }
+  });
+  window.cg.set({
+    movable: {
+      ...window.cg.state.movable,
+      dests: dests,
+      color: 'both',
+      free: false,
+      showDests: true
+    }
+  });
+}
+
+function drawArrows(moves) {
+  if (typeof window.cg === 'undefined') return;
+  const shapes = [];
+  (moves || []).forEach(move => {
+    const from = move.uci ? move.uci.substring(0, 2) : null;
+    const to = move.uci ? move.uci.substring(2, 4) : null;
+    if (!from || !to || !isValidSquare(from) || !isValidSquare(to)) return;
+    shapes.push({ orig: from, dest: to, brush: 'repertoire', system: true });
+  });
+  window.cg.setShapes(shapes);
+}
+
+/**
+ * Recovery function to reset training state when stuck
+ */
+function resetTrainingState() {
+  console.log('🔄 Resetting training state...');
+  
+  // Reset turn state
+  appState.isOpponentTurn = false;
+  
+  // Clear any pending timeouts
+  if (window.trainingTimeout) {
+    clearTimeout(window.trainingTimeout);
+    window.trainingTimeout = null;
+  }
+  
+  // Reset board to current position
+  try {
+    renderChessBoard(appState.currentPosition, appState.currentColor);
+  } catch (error) {
+    console.error('❌ Error resetting board:', error);
+  }
+  
+  // Update UI
+  updateTrainingStatus();
+  showTrainingFeedback('Training state reset - your turn', 'info');
+  
+  console.log('✅ Training state reset complete');
+}
+
+/**
+ * Add manual reset button to training UI
+ */
+function addTrainingResetButton() {
+  // Remove existing reset button if present
+  const existingBtn = document.getElementById('resetTrainingBtn');
+  if (existingBtn) {
+    existingBtn.remove();
+  }
+  
+  // Create new reset button
+  const resetBtn = document.createElement('button');
+  resetBtn.id = 'resetTrainingBtn';
+  resetBtn.textContent = '🔄 Reset Training';
+  resetBtn.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background: #f39c12;
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(243, 156, 18, 0.3);
+  `;
+  resetBtn.addEventListener('click', resetTrainingState);
+  document.body.appendChild(resetBtn);
+}
+
+/**
+ * Remove training reset button
+ */
+function removeTrainingResetButton() {
+  const resetBtn = document.getElementById('resetTrainingBtn');
+  if (resetBtn) {
+    resetBtn.remove();
   }
 }

@@ -1,10 +1,10 @@
 <!--
-  horus openings – Haupt-Frontend
+  horus openings – Main Frontend
   --------------------------------
-  - Visualisiert Schacheröffnungen im Browser
-  - Nutzt chessboard.js (Brett) & chess.js (Logik)
-  - Kommuniziert mit FastAPI-Backend
-  - Spieler- und Zugauswahl, Statistikanzeige
+  - Visualizes chess openings in the browser
+  - Uses chessboard.js (board) & chess.js (logic)
+  - Communicates with FastAPI backend
+  - Player and move selection, statistics display
 -->
 <!DOCTYPE html>
 <html lang="de">
@@ -29,7 +29,7 @@
     <!-- Menü-Bereich: Spielerwahl & Neuer Spieler (zentriert, modern) -->    <div class="section player-menu" style="max-width: 1200px; margin: 0 auto 30px auto; padding: 0 20px;">
       <div class="player-controls" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; align-items: start;">
         <!-- Vorhandene Spieler -->        <div class="existing-players" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef;">
-          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Vorhandene Spieler</h3>
+          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Existing Players</h3>
           
           <select id="playerSelect" style="
             padding: 12px 14px; 
@@ -43,15 +43,15 @@
             width: 100%;
             box-sizing: border-box;
           ">
-            <option>Lade Spieler...</option>
+            <option>Loading players...</option>
           </select>
           
           <div class="color-filter" style="margin-bottom: 32px; text-align: center;">
             <label style="margin-right: 20px; font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
-              <input type="radio" name="colorSelect" value="white" checked style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Weiß
+              <input type="radio" name="colorSelect" value="white" checked style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> White
             </label>
             <label style="font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
-              <input type="radio" name="colorSelect" value="black" style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Schwarz
+              <input type="radio" name="colorSelect" value="black" style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Black
             </label>
           </div>
           
@@ -67,15 +67,15 @@
             box-shadow: 0 4px 12px rgba(44, 62, 80, 0.2); 
             width: 100%;
           ">
-            📊 Eröffnungen analysieren
+            📊 Analyze Openings
           </button>
           
           <div style="margin-top: 12px; min-height: 22px;"></div>
         </div>
         <!-- Neuer Spieler -->        <div class="new-player" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef;">
-          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Neuen Spieler hinzufügen</h3>
+          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Add New Player</h3>
           
-          <input type="text" id="newPlayerName" placeholder="z.B. Magnus_Carlsen" style="
+          <input type="text" id="newPlayerName" placeholder="e.g. Magnus_Carlsen" style="
             padding: 12px 14px; 
             border-radius: 8px; 
             border: 2px solid #dee2e6; 
@@ -88,7 +88,7 @@
             box-sizing: border-box;
           ">
           
-          <input type="number" id="downloadLimit" min="10" max="1000" step="10" value="200" placeholder="Limit (z.B. 200)" style="
+          <input type="number" id="downloadLimit" min="10" max="1000" step="10" value="200" placeholder="Limit (e.g. 200)" style="
             padding: 12px 14px; 
             border-radius: 8px; 
             border: 2px solid #dee2e6; 
@@ -113,7 +113,7 @@
             box-shadow: 0 4px 12px rgba(39, 174, 96, 0.2); 
             width: 100%;
           ">
-            ➕ Spieler hinzufügen
+            ➕ Add Player
           </button>
           
           <div id="downloadStatus" style="margin-top: 12px; min-height: 22px; color: #e74c3c; font-size: 0.9rem; text-align: center;"></div>
@@ -121,14 +121,14 @@
         
         <!-- Eigenes Repertoire -->
         <div class="own-repertoire" style="background: #f8f9fa; padding: 20px; border-radius: 12px; border: 1px solid #e9ecef;">
-          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Eigenes Repertoire</h3>
+          <h3 style="font-size: 1.2rem; color: #2c3e50; margin: 0 0 16px 0; font-weight: 600; text-align: center;">Own Repertoire</h3>
           
           <div class="color-filter" style="margin-bottom: 24px; text-align: center;">
             <label style="margin-right: 20px; font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
-              <input type="radio" name="repertoireColorSelect" value="white" checked style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Weiß
+              <input type="radio" name="repertoireColorSelect" value="white" checked style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> White
             </label>
             <label style="font-size: 1rem; color: #495057; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;">
-              <input type="radio" name="repertoireColorSelect" value="black" style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Schwarz
+              <input type="radio" name="repertoireColorSelect" value="black" style="margin: 0; accent-color: #2c3e50; transform: scale(1.1);"> Black
             </label>
           </div>
           
@@ -145,7 +145,7 @@
             width: 100%;
             margin-bottom: 12px;
           ">
-            📋 Repertoire ansehen/bearbeiten
+            📋 View/Edit Repertoire
           </button>
           
           <button id="trainRepertoireBtn" style="
@@ -160,7 +160,7 @@
             box-shadow: 0 4px 12px rgba(230, 126, 34, 0.2); 
             width: 100%;
           ">
-            🎯 Repertoire trainieren
+            🎯 Train Repertoire
           </button>
         </div>
       </div>
@@ -175,7 +175,7 @@
         <div id="chessboardSection" class="board-card" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h4 style="margin: 0; color: #333; font-size: 1.2rem;">Current Position</h4>
-            <button id="flipBoardBtn" class="flip-btn" title="Brett drehen" style="background: #f0f0f0; border: 1px solid #bbb; cursor: pointer; padding: 6px 12px; font-size: 0.9rem; font-weight: 600; border-radius: 6px; color: #2c3e50; transition: background 0.18s, color 0.18s;">
+            <button id="flipBoardBtn" class="flip-btn" title="Flip Board" style="background: #f0f0f0; border: 1px solid #bbb; cursor: pointer; padding: 6px 12px; font-size: 0.9rem; font-weight: 600; border-radius: 6px; color: #2c3e50; transition: background 0.18s, color 0.18s;">
               🔄 Flip
             </button>
           </div>
